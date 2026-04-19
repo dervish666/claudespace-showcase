@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L-Systems — Fractal Plants</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; color: #c8ccd0; font-family: 'Courier New', monospace; overflow: hidden; }
+.container { display: flex; height: 100vh; }
+.sidebar {
+  width: 260px; min-width: 260px; background: #12121a;
+  border-right: 1px solid #2a2a3a; padding: 16px;
+  display: flex; flex-direction: column; gap: 10px; overflow-y: auto;
+}
+.canvas-wrap { flex: 1; position: relative; }
+canvas { display: block; width: 100%; height: 100%; }
+h1 { font-size: 16px; color: #7fdbca; letter-spacing: 2px; text-transform: uppercase; }
+h2 { font-size: 11px; color: #c792ea; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 2px; }
+.btn {
+  background: #1a1a2e; border: 1px solid #2a2a4a; color: #c8ccd0;
+  padding: 7px 10px; cursor: pointer; font-family: inherit; font-size: 11px;
+  transition: all 0.2s; text-align: left; display: block; width: 100%;
+}
+.btn:hover { background: #2a2a4e; border-color: #7fdbca; }
+.btn.active { background: #2a2a4e; border-color: #7fdbca; color: #7fdbca; }
+.slider-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.slider-row label { font-size: 10px; color: #888; min-width: 55px; }
+.slider-row input[type=range] { flex: 1; accent-color: #7fdbca; }
+.slider-row .val { font-size: 10px; color: #7fdbca; min-width: 28px; text-align: right; }
+.info { font-size: 10px; color: #666; line-height: 1.4; margin-top: auto; }
+a.back { display: block; color: #7fdbca; font-size: 11px; text-decoration: none; margin-bottom: 8px; }
+a.back:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="sidebar">
+  <a class="back" href="/">&larr; Automata</a>
+  <h1>L-Systems</h1>
+  <p style="font-size:10px;color:#888;margin:-4px 0 4px">Fractal plants from simple rules</p>
+
+  <h2>Presets</h2>
+  <div id="presets"></div>
+
+  <h2>Parameters</h2>
+  <div class="slider-row">
+    <label>Iterations</label>
+    <input type="range" id="sl-iter" min="1" max="8" value="5">
+    <span class="val" id="v-iter">5</span>
+  </div>
+  <div class="slider-row">
+    <label>Angle</label>
+    <input type="range" id="sl-angle" min="5" max="90" value="25">
+    <span class="val" id="v-angle">25°</span>
+  </div>
+  <div class="slider-row">
+    <label>Length</label>
+    <input type="range" id="sl-len" min="1" max="20" value="6">
+    <span class="val" id="v-len">6</span>
+  </div>
+  <div class="slider-row">
+    <label>Shrink</label>
+    <input type="range" id="sl-shrink" min="50" max="100" value="80">
+    <span class="val" id="v-shrink">80%</span>
+  </div>
+  <div class="slider-row">
+    <label>Width</label>
+    <input type="range" id="sl-width" min="1" max="10" value="3">
+    <span class="val" id="v-width">3</span>
+  </div>
+  <div class="slider-row">
+    <label>Jitter</label>
+    <input type="range" id="sl-jitter" min="0" max="30" value="5">
+    <span class="val" id="v-jitter">5°</span>
+  </div>
+
+  <h2>Colors</h2>
+  <div id="color-btns" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+
+  <button class="btn" onclick="animateGrow()" style="margin-top:6px">&#9654; Grow Animation</button>
+  <button class="btn" onclick="render()">Redraw</button>
+
+  <div class="info">
+    <b>L-systems</b> (Lindenmayer systems) model plant growth with string rewriting rules.
+    Starting from an axiom, each character is replaced by a production rule, then interpreted
+    as turtle graphics: F=forward, +=turn right, -=turn left, [=save, ]=restore.
+  </div>
+</div>
+<div class="canvas-wrap">
+  <canvas id="c"></canvas>
+</div>
+</div>
+
+<script>
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+
+// Presets — classic L-system fractals
+var PRESETS = [
+  {name: 'Fern', axiom: 'X', rules: {X: 'F+[[X]-X]-F[-FX]+X', F: 'FF'}, angle: 25, iter: 6, len: 4, shrink: 80, width: 2, jitter: 3},
+  {name: 'Bush', axiom: 'F', rules: {F: 'FF+[+F-F-F]-[-F+F+F]'}, angle: 22, iter: 4, len: 8, shrink: 75, width: 3, jitter: 5},
+  {name: 'Tree', axiom: 'X', rules: {X: 'F[-X][+X]FX', F: 'FF'}, angle: 30, iter: 6, len: 3, shrink: 82, width: 2, jitter: 8},
+  {name: 'Weed', axiom: 'F', rules: {F: 'F[+F]F[-F]F'}, angle: 25.7, iter: 5, len: 5, shrink: 68, width: 2, jitter: 2},
+  {name: 'Seaweed', axiom: 'F', rules: {F: 'F[+F]F[-F][F]'}, angle: 20, iter: 5, len: 5, shrink: 72, width: 2, jitter: 10},
+  {name: 'Coral', axiom: 'F+F+F+F', rules: {F: 'FF+F+F+F+FF'}, angle: 90, iter: 4, len: 6, shrink: 60, width: 2, jitter: 0},
+  {name: 'Hilbert', axiom: 'A', rules: {A: '-BF+AFA+FB-', B: '+AF-BFB-FA+'}, angle: 90, iter: 5, len: 6, shrink: 100, width: 1, jitter: 0},
+  {name: 'Sierpinski', axiom: 'A', rules: {A: 'B-A-B', B: 'A+B+A'}, angle: 60, iter: 7, len: 3, shrink: 100, width: 1, jitter: 0},
+  {name: 'Dragon', axiom: 'FX', rules: {X: 'X+YF+', Y: '-FX-Y'}, angle: 90, iter: 12, len: 5, shrink: 100, width: 1, jitter: 0},
+  {name: 'Blossom', axiom: 'X', rules: {X: 'F[+X][-X]FX', F: 'FF'}, angle: 35, iter: 5, len: 5, shrink: 78, width: 2, jitter: 6},
+  {name: 'Canopy', axiom: 'X', rules: {X: 'F-[[X]+X]+F[+FX]-X', F: 'FF'}, angle: 22.5, iter: 5, len: 5, shrink: 76, width: 3, jitter: 4},
+  {name: 'Grass', axiom: 'X', rules: {X: 'F[+X]F[-X]+X', F: 'FF'}, angle: 20, iter: 6, len: 2, shrink: 85, width: 1, jitter: 12},
+];
+
+var COLOR_SCHEMES = [
+  {name: 'Forest', trunk: '#4a3020', leaf: '#2a7a2a', tip: '#5ab05a', bg: '#0a0a0f'},
+  {name: 'Autumn', trunk: '#5a3a1a', leaf: '#c07020', tip: '#e0a030', bg: '#0a0a0f'},
+  {name: 'Cherry', trunk: '#3a2a2a', leaf: '#c04060', tip: '#f080a0', bg: '#0a0a0f'},
+  {name: 'Arctic', trunk: '#4a5a6a', leaf: '#6a9ab0', tip: '#a0d0e0', bg: '#0a0a0f'},
+  {name: 'Neon', trunk: '#1a4a3a', leaf: '#00cc88', tip: '#00ffaa', bg: '#0a0a0f'},
+  {name: 'Mono', trunk: '#888', leaf: '#aaa', tip: '#ddd', bg: '#0a0a0f'},
+];
+
+var currentPreset = 0;
+var currentColors = 0;
+var animating = false;
+var animFrame = 0;
+var animMax = 0;
+var segments = []; // rendered segments for animation
+
+function resize() {
+  var wrap = canvas.parentElement;
+  canvas.width = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+}
+
+function getParams() {
+  return {
+    angle: parseFloat(document.getElementById('sl-angle').value),
+    iter: parseInt(document.getElementById('sl-iter').value),
+    len: parseFloat(document.getElementById('sl-len').value),
+    shrink: parseFloat(document.getElementById('sl-shrink').value) / 100,
+    width: parseFloat(document.getElementById('sl-width').value),
+    jitter: parseFloat(document.getElementById('sl-jitter').value),
+  };
+}
+
+function setSliders(p) {
+  document.getElementById('sl-angle').value = p.angle;
+  document.getElementById('sl-iter').value = p.iter;
+  document.getElementById('sl-len').value = p.len;
+  document.getElementById('sl-shrink').value = Math.round(p.shrink * 100 || p.shrink);
+  document.getElementById('sl-width').value = p.width;
+  document.getElementById('sl-jitter').value = p.jitter;
+  updateLabels();
+}
+
+function updateLabels() {
+  document.getElementById('v-iter').textContent = document.getElementById('sl-iter').value;
+  document.getElementById('v-angle').textContent = document.getElementById('sl-angle').value + '°';
+  document.getElementById('v-len').textContent = document.getElementById('sl-len').value;
+  document.getElementById('v-shrink').textContent = document.getElementById('sl-shrink').value + '%';
+  document.getElementById('v-width').textContent = document.getElementById('sl-width').value;
+  document.getElementById('v-jitter').textContent = document.getElementById('sl-jitter').value + '°';
+}
+
+function generateString(axiom, rules, iterations) {
+  var str = axiom;
+  for (var i = 0; i < iterations; i++) {
+    var next = '';
+    for (var j = 0; j < str.length; j++) {
+      var ch = str[j];
+      next += rules[ch] || ch;
+    }
+    str = next;
+    // Safety: cap string length to prevent browser freeze
+    if (str.length > 500000) break;
+  }
+  return str;
+}
+
+function interpretString(str, params, colors) {
+  var segs = [];
+  var x = canvas.width / 2;
+  var y = canvas.height - 40;
+  var angle = -90; // start pointing up
+  var len = params.len;
+  var width = params.width;
+  var stack = [];
+  var depth = 0;
+  var maxDepth = 0;
+
+  for (var i = 0; i < str.length; i++) {
+    var ch = str[i];
+    if (ch === 'F' || ch === 'A' || ch === 'B') {
+      var jitter = params.jitter > 0 ? (Math.random() - 0.5) * params.jitter * 2 : 0;
+      var rad = (angle + jitter) * Math.PI / 180;
+      var nx = x + Math.cos(rad) * len;
+      var ny = y + Math.sin(rad) * len;
+      segs.push({x1: x, y1: y, x2: nx, y2: ny, width: width, depth: depth});
+      if (depth > maxDepth) maxDepth = depth;
+      x = nx; y = ny;
+    } else if (ch === '+') {
+      angle += params.angle;
+    } else if (ch === '-') {
+      angle -= params.angle;
+    } else if (ch === '[') {
+      stack.push({x: x, y: y, angle: angle, len: len, width: width, depth: depth});
+      len *= params.shrink;
+      width *= 0.85;
+      if (width < 0.5) width = 0.5;
+      depth++;
+    } else if (ch === ']') {
+      if (stack.length > 0) {
+        var s = stack.pop();
+        x = s.x; y = s.y; angle = s.angle; len = s.len; width = s.width; depth = s.depth;
+      }
+    }
+  }
+
+  // Normalize max depth for coloring
+  for (var si = 0; si < segs.length; si++) {
+    segs[si].depthNorm = maxDepth > 0 ? segs[si].depth / maxDepth : 0;
+  }
+
+  return segs;
+}
+
+function lerpColor(c1, c2, t) {
+  // Parse hex colors and interpolate
+  var r1 = parseInt(c1.slice(1,3),16), g1 = parseInt(c1.slice(3,5),16), b1 = parseInt(c1.slice(5,7),16);
+  var r2 = parseInt(c2.slice(1,3),16), g2 = parseInt(c2.slice(3,5),16), b2 = parseInt(c2.slice(5,7),16);
+  var r = Math.round(r1 + (r2-r1)*t), g = Math.round(g1 + (g2-g1)*t), b = Math.round(b1 + (b2-b1)*t);
+  return 'rgb('+r+','+g+','+b+')';
+}
+
+function drawSegments(segs, count) {
+  var colors = COLOR_SCHEMES[currentColors];
+  ctx.fillStyle = colors.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  var n = count !== undefined ? Math.min(count, segs.length) : segs.length;
+  for (var i = 0; i < n; i++) {
+    var seg = segs[i];
+    var t = seg.depthNorm;
+    // Trunk → leaf → tip color gradient
+    var color;
+    if (t < 0.3) color = lerpColor(colors.trunk, colors.leaf, t / 0.3);
+    else color = lerpColor(colors.leaf, colors.tip, (t - 0.3) / 0.7);
+
+    ctx.beginPath();
+    ctx.moveTo(seg.x1, seg.y1);
+    ctx.lineTo(seg.x2, seg.y2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = seg.width;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Draw small circles at tips (leaves/flowers)
+    if (t > 0.8 && i === n - 1 || (count !== undefined && i === n - 1)) {
+      // skip during animation — only on final frame
+    }
+  }
+
+  // Draw leaf/flower dots at branch tips (only when fully drawn)
+  if (count === undefined || count >= segs.length) {
+    for (var j = 0; j < segs.length; j++) {
+      var s = segs[j];
+      if (s.depthNorm > 0.85) {
+        ctx.beginPath();
+        ctx.arc(s.x2, s.y2, 1.5 + s.depthNorm * 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = colors.tip;
+        ctx.globalAlpha = 0.6;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // Label
+  ctx.font = '11px Courier New';
+  ctx.fillStyle = '#444';
+  ctx.textAlign = 'left';
+  ctx.fillText('L-Systems — ' + PRESETS[currentPreset].name + ' (' + segs.length + ' segments)', 12, canvas.height - 12);
+}
+
+function render() {
+  resize();
+  animating = false;
+  var preset = PRESETS[currentPreset];
+  var params = getParams();
+  var str = generateString(preset.axiom, preset.rules, params.iter);
+  segments = interpretString(str, params, COLOR_SCHEMES[currentColors]);
+
+  // Auto-fit: find bounds and scale/translate
+  if (segments.length > 0) {
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (var i = 0; i < segments.length; i++) {
+      var s = segments[i];
+      if (s.x1 < minX) minX = s.x1; if (s.x2 < minX) minX = s.x2;
+      if (s.x1 > maxX) maxX = s.x1; if (s.x2 > maxX) maxX = s.x2;
+      if (s.y1 < minY) minY = s.y1; if (s.y2 < minY) minY = s.y2;
+      if (s.y1 > maxY) maxY = s.y1; if (s.y2 > maxY) maxY = s.y2;
+    }
+    var bw = maxX - minX || 1, bh = maxY - minY || 1;
+    var margin = 60;
+    var scaleX = (canvas.width - margin * 2) / bw;
+    var scaleY = (canvas.height - margin * 2) / bh;
+    var scale = Math.min(scaleX, scaleY, 8); // cap max zoom
+    var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    var ox = canvas.width / 2, oy = canvas.height / 2;
+    for (var j = 0; j < segments.length; j++) {
+      segments[j].x1 = (segments[j].x1 - cx) * scale + ox;
+      segments[j].y1 = (segments[j].y1 - cy) * scale + oy;
+      segments[j].x2 = (segments[j].x2 - cx) * scale + ox;
+      segments[j].y2 = (segments[j].y2 - cy) * scale + oy;
+      segments[j].width *= Math.min(scale, 1.5);
+    }
+  }
+
+  drawSegments(segments);
+}
+
+function animateGrow() {
+  if (animating) return;
+  resize();
+  var preset = PRESETS[currentPreset];
+  var params = getParams();
+  var str = generateString(preset.axiom, preset.rules, params.iter);
+  segments = interpretString(str, params, COLOR_SCHEMES[currentColors]);
+
+  // Auto-fit
+  if (segments.length > 0) {
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (var i = 0; i < segments.length; i++) {
+      var s = segments[i];
+      if (s.x1 < minX) minX = s.x1; if (s.x2 < minX) minX = s.x2;
+      if (s.x1 > maxX) maxX = s.x1; if (s.x2 > maxX) maxX = s.x2;
+      if (s.y1 < minY) minY = s.y1; if (s.y2 < minY) minY = s.y2;
+      if (s.y1 > maxY) maxY = s.y1; if (s.y2 > maxY) maxY = s.y2;
+    }
+    var bw = maxX - minX || 1, bh = maxY - minY || 1;
+    var margin = 60;
+    var scaleX = (canvas.width - margin * 2) / bw;
+    var scaleY = (canvas.height - margin * 2) / bh;
+    var scale = Math.min(scaleX, scaleY, 3);
+    var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    var ox = canvas.width / 2, oy = canvas.height / 2;
+    for (var j = 0; j < segments.length; j++) {
+      segments[j].x1 = (segments[j].x1 - cx) * scale + ox;
+      segments[j].y1 = (segments[j].y1 - cy) * scale + oy;
+      segments[j].x2 = (segments[j].x2 - cx) * scale + ox;
+      segments[j].y2 = (segments[j].y2 - cy) * scale + oy;
+      segments[j].width *= Math.min(scale, 1.5);
+    }
+  }
+
+  animating = true;
+  animFrame = 0;
+  animMax = segments.length;
+  var speed = Math.max(1, Math.floor(animMax / 300)); // draw in ~300 frames
+
+  function step() {
+    if (!animating) return;
+    animFrame += speed;
+    if (animFrame >= animMax) {
+      animFrame = animMax;
+      animating = false;
+    }
+    drawSegments(segments, animFrame);
+    if (animating) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function selectPreset(idx) {
+  currentPreset = idx;
+  var p = PRESETS[idx];
+  setSliders({angle: p.angle, iter: p.iter, len: p.len, shrink: p.shrink * 100, width: p.width, jitter: p.jitter});
+  // Update active button
+  var btns = document.querySelectorAll('#presets .btn');
+  btns.forEach(function(b, i) { b.className = 'btn' + (i === idx ? ' active' : ''); });
+  render();
+}
+
+// Build UI
+function buildUI() {
+  var presetsDiv = document.getElementById('presets');
+  PRESETS.forEach(function(p, i) {
+    var btn = document.createElement('button');
+    btn.className = 'btn' + (i === 0 ? ' active' : '');
+    btn.textContent = p.name;
+    btn.onclick = function() { selectPreset(i); };
+    presetsDiv.appendChild(btn);
+  });
+
+  var colorsDiv = document.getElementById('color-btns');
+  COLOR_SCHEMES.forEach(function(c, i) {
+    var btn = document.createElement('button');
+    btn.className = 'btn' + (i === 0 ? ' active' : '');
+    btn.textContent = c.name;
+    btn.style.fontSize = '10px';
+    btn.style.padding = '4px 8px';
+    btn.style.width = 'auto';
+    btn.style.flex = '1';
+    btn.onclick = function() {
+      currentColors = i;
+      colorsDiv.querySelectorAll('.btn').forEach(function(b, j) {
+        b.className = 'btn' + (j === i ? ' active' : '');
+      });
+      render();
+    };
+    colorsDiv.appendChild(btn);
+  });
+
+  // Slider change events
+  ['sl-iter','sl-angle','sl-len','sl-shrink','sl-width','sl-jitter'].forEach(function(id) {
+    document.getElementById(id).addEventListener('input', function() {
+      updateLabels();
+      render();
+    });
+  });
+}
+
+// Visibility API
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) animating = false;
+});
+
+window.addEventListener('resize', function() { render(); });
+
+buildUI();
+selectPreset(0);
+</script>
+</body>
+</html>

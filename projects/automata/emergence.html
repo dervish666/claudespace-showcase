@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emergence — Eight Models of Collective Behaviour</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a10;color:#b0b8c8;font-family:system-ui,-apple-system,sans-serif;min-height:100vh}
+.hero{padding:4rem 2rem 3rem;text-align:center;max-width:700px;margin:0 auto}
+.hero h1{font-size:2rem;font-weight:200;color:#d0d8e8;letter-spacing:3px;margin-bottom:1rem}
+.hero p{font-size:0.95rem;line-height:1.7;color:#7080a0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:2px;max-width:1000px;margin:0 auto;padding:0 2rem 4rem}
+.card{position:relative;background:#10121a;overflow:hidden;cursor:pointer;transition:all 0.4s}
+.card:hover{background:#151820}
+.card a{display:block;text-decoration:none;color:inherit;padding:2rem}
+.card .number{font-size:0.7rem;color:#3a4a60;letter-spacing:2px;margin-bottom:0.5rem}
+.card h2{font-size:1.1rem;font-weight:300;color:#c0cce0;margin-bottom:0.5rem;letter-spacing:1px}
+.card .rule{font-size:0.8rem;color:#5a6a80;line-height:1.6;margin-bottom:0.8rem}
+.card .emerges{font-size:0.75rem;color:#4a7060;line-height:1.5}
+.card .emerges strong{color:#5a9080}
+.card .bar{position:absolute;bottom:0;left:0;right:0;height:2px;opacity:0;transition:opacity 0.3s}
+.card:hover .bar{opacity:1}
+.footer{text-align:center;padding:2rem;font-size:0.7rem;color:#2a3a50;border-top:1px solid #141820;max-width:700px;margin:0 auto}
+.footer a{color:#4a6080;text-decoration:none}
+.footer a:hover{color:#7090b0}
+</style>
+</head>
+<body>
+<div class="hero">
+  <h1>Emergence</h1>
+  <p>Eight models of collective behaviour. Each starts with simple local rules between agents that know nothing of the whole. Each produces complex global patterns that no agent intended. The intelligence is in the interaction, not the individual.</p>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <a href="/">
+      <div class="number">I</div>
+      <h2>Cellular Automata</h2>
+      <div class="rule">Discrete cells on a grid. Each cell looks at its neighbours and decides: alive or dead. That's all.</div>
+      <div class="emerges"><strong>Emerges:</strong> gliders, oscillators, spaceships, universal computation. Conway proved a grid of on/off cells following a two-line rule can compute anything.</div>
+      <div class="bar" style="background:linear-gradient(90deg,#7fdbca,#2a6050)"></div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="/lenia.html">
+      <div class="number">II</div>
+      <h2>Lenia</h2>
+      <div class="rule">Continuous cells, smooth kernels, floating-point states. The discrete grid dissolved into a continuous field.</div>
+      <div class="emerges"><strong>Emerges:</strong> organisms that grow, move, reproduce, and die. Some hunt, some graze, some pulse. Artificial life from a differential equation.</div>
+      <div class="bar" style="background:linear-gradient(90deg,#c792ea,#5a3080)"></div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="/fluid.html">
+      <div class="number">III</div>
+      <h2>Fluid Dynamics</h2>
+      <div class="rule">Conservation of mass and momentum. Pressure pushes, viscosity drags, advection carries. The Navier-Stokes equations.</div>
+      <div class="emerges"><strong>Emerges:</strong> vortices, turbulence, Kármán streets, laminar-to-turbulent transitions. The unsolved mathematics of why cream swirls in coffee.</div>
+      <div class="bar" style="background:linear-gradient(90deg,#7fdbca,#2a5080)"></div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="/reaction.html">
+      <div class="number">IV</div>
+      <h2>Reaction-Diffusion</h2>
+      <div class="rule">Two chemicals. One activates, one inhibits. Both diffuse. The ratio of their diffusion rates determines everything.</div>
+      <div class="emerges"><strong>Emerges:</strong> spots, stripes, spirals, coral, fingerprints. Turing's 1952 morphogenesis paper — the mechanism behind animal markings.</div>
+      <div class="bar" style="background:linear-gradient(90deg,#ff7eb6,#802040)"></div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="/particles.html">
+      <div class="number">V</div>
+      <h2>Particle Life</h2>
+      <div class="rule">Coloured particles. A random matrix says how much each colour attracts or repels every other. Repel close, attract medium, ignore far.</div>
+      <div class="emerges"><strong>Emerges:</strong> cells, chains, orbits, predator-prey cycles, symbiosis. A 6×6 matrix produces ecosystems. Change one number, collapse a civilisation.</div>
+      <div class="bar" style="background:linear-gradient(90deg,#f0c674,#806020)"></div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="/boids.html">
+      <div class="number">VI</div>
+      <h2>Boids</h2>
+      <div class="rule">Three rules: don't crowd nearby birds, steer toward their heading, steer toward their centre. No leader. No plan.</div>
+      <div class="emerges"><strong>Emerges:</strong> flocking, murmuration, predator evasion. A thousand agents that look individually stupid produce collectively intelligent movement.</div>
+      <div class="bar" style="background:linear-gradient(90deg,#82aaff,#2a4080)"></div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="/wfc.html">
+      <div class="number">VII</div>
+      <h2>Wave Function Collapse</h2>
+      <div class="rule">Each cell holds a superposition of possibilities. Observe one, and its neighbours' possibilities narrow. Constraint propagation ripples outward.</div>
+      <div class="emerges"><strong>Emerges:</strong> coherent maps, dungeons, circuits, cities — all from local adjacency rules. The bridge between noise and design. Structure from constraint, not instruction.</div>
+      <div class="bar" style="background:linear-gradient(90deg,#e0a060,#805020)"></div>
+    </a>
+  </div>
+
+  <div class="card">
+    <a href="/evolution.html">
+      <div class="number">VIII</div>
+      <h2>Evolution</h2>
+      <div class="rule">Creatures with neural networks sense food and each other. Genes mutate on reproduction. Energy determines survival. Fitness is emergent, not designed.</div>
+      <div class="emerges"><strong>Emerges:</strong> adaptation, speciation, arms races, niche differentiation — natural selection as computation. The only optimiser that works without understanding the problem.</div>
+      <div class="bar" style="background:linear-gradient(90deg,#a0e060,#406020)"></div>
+    </a>
+  </div>
+</div>
+
+<div class="footer">
+  <p>The same principle in eight forms: simple agents, local rules, no central controller → complex collective behaviour.</p>
+  <p style="margin-top:0.5rem">Part of the <a href="https://github.com/">claudespace-showcase</a> collection.</p>
+</div>
+</body>
+</html>

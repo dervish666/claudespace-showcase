@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terrain — Procedural Flight</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+canvas { display: block; width: 100vw; height: 100vh; }
+#hud {
+  position: fixed; top: 0; left: 0; right: 0; padding: 12px 20px;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  pointer-events: none; z-index: 10;
+}
+#hud > div { pointer-events: auto; }
+.hud-left { color: rgba(180,220,255,0.7); font-size: 11px; line-height: 1.6; }
+.hud-right { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.btn {
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(180,220,255,0.3);
+  color: rgba(180,220,255,0.8); padding: 4px 10px; border-radius: 4px;
+  cursor: pointer; font-family: inherit; font-size: 11px; transition: all 0.2s;
+}
+.btn:hover, .btn.active { background: rgba(100,180,255,0.2); border-color: rgba(100,180,255,0.6); }
+#start {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  z-index: 20; background: rgba(0,0,0,0.6); border: 1px solid rgba(180,220,255,0.4);
+  color: rgba(180,220,255,0.9); padding: 20px 40px; font-size: 16px;
+  font-family: inherit; cursor: pointer; border-radius: 8px; text-align: center;
+  line-height: 2;
+}
+#start small { display: block; font-size: 11px; color: rgba(180,220,255,0.5); margin-top: 8px; }
+#compass {
+  position: fixed; bottom: 20px; right: 20px; width: 80px; height: 80px;
+  pointer-events: none; z-index: 10;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="start">
+  Click to Fly
+  <small>WASD — pitch &amp; roll<br>Q/E — yaw<br>Shift/Ctrl — speed<br>Space — toggle autopilot<br>1-4 — biomes</small>
+</div>
+
+<div id="hud" style="display:none">
+  <div class="hud-left" id="info">
+    ALT: 0m | SPD: 0 | HDG: 000°
+  </div>
+  <div class="hud-right">
+    <button class="btn" onclick="cycleBiome()">Biome</button>
+    <button class="btn" onclick="cycleTime()">Time</button>
+    <button class="btn" id="autoBtn" onclick="toggleAuto()">Auto</button>
+    <a href="/" class="btn">← Voyage</a>
+  </div>
+</div>
+
+<canvas id="compass"></canvas>
+
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { antialias: false, alpha: false });
+
+// State
+let flying = false, autopilot = true;
+let camPos = [0, 300, 0];
+let camVel = [0, 0, -80]; // forward velocity
+let pitch = -0.1, yaw = 0, roll = 0;
+let speed = 80, targetSpeed = 80;
+let biome = 0, timeOfDay = 0.35; // morning
+const biomeNames = ['Alpine', 'Desert', 'Oceanic', 'Volcanic'];
+const keys = {};
+
+// Resize
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio, 1.5);
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Shaders
+const VS = `
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0, 1);
+}`;
+
+const FS = `
+precision highp float;
+varying vec2 v_uv;
+uniform float u_time;
+uniform float u_timeOfDay;
+uniform vec3 u_camPos;
+uniform mat3 u_camRot;
+uniform vec2 u_res;
+uniform float u_biome;
+
+// --- Noise ---
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash(i), b = hash(i + vec2(1,0));
+  float c = hash(i + vec2(0,1)), d = hash(i + vec2(1,1));
+  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+
+float fbm(vec2 p, int octaves) {
+  float v = 0.0, a = 0.5;
+  mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+  for (int i = 0; i < 8; i++) {
+    if (i >= octaves) break;
+    v += a * noise(p);
+    p = rot * p * 2.0;
+    a *= 0.5;
+  }
+  return v;
+}
+
+// --- Terrain height ---
+float terrainH(vec2 p) {
+  float h;
+  if (u_biome < 0.5) {
+    // Alpine: sharp peaks, valleys
+    h = fbm(p * 0.003, 7) * 500.0;
+    h += fbm(p * 0.015, 4) * 60.0;
+    float ridge = abs(fbm(p * 0.006, 5) - 0.5) * 2.0;
+    h += ridge * ridge * 200.0;
+  } else if (u_biome < 1.5) {
+    // Desert: dunes, mesas
+    h = fbm(p * 0.002, 5) * 200.0;
+    float dune = sin(p.x * 0.01 + fbm(p * 0.005, 3) * 3.0) * 0.5 + 0.5;
+    h += dune * dune * 80.0;
+    float mesa = smoothstep(0.55, 0.6, fbm(p * 0.004, 4));
+    h += mesa * 150.0;
+  } else if (u_biome < 2.5) {
+    // Oceanic: islands, shallow water
+    h = fbm(p * 0.002, 6) * 300.0 - 100.0;
+    h += fbm(p * 0.01, 4) * 40.0;
+  } else {
+    // Volcanic: calderas, lava flows
+    h = fbm(p * 0.003, 6) * 400.0;
+    float volcano = 1.0 - length(fract(p * 0.001) - 0.5) * 3.0;
+    volcano = max(volcano, 0.0);
+    h += volcano * volcano * 300.0;
+    h -= smoothstep(0.7, 0.9, volcano) * 100.0; // caldera
+  }
+  return h;
+}
+
+vec3 terrainNormal(vec2 p) {
+  float e = 2.0;
+  float h = terrainH(p);
+  float hx = terrainH(p + vec2(e, 0));
+  float hz = terrainH(p + vec2(0, e));
+  return normalize(vec3(h - hx, e, h - hz));
+}
+
+// --- Terrain color ---
+vec3 terrainColor(vec2 p, float h, vec3 n) {
+  if (u_biome < 0.5) {
+    // Alpine
+    float snow = smoothstep(280.0, 350.0, h + n.y * 80.0);
+    float grass = smoothstep(50.0, 150.0, h) * (1.0 - snow);
+    vec3 rock = vec3(0.35, 0.32, 0.28);
+    vec3 col = mix(rock, vec3(0.2, 0.45, 0.15), grass);
+    col = mix(col, vec3(0.9, 0.92, 0.95), snow);
+    return col;
+  } else if (u_biome < 1.5) {
+    // Desert
+    vec3 sand = vec3(0.76, 0.65, 0.45);
+    vec3 red = vec3(0.7, 0.35, 0.2);
+    float blend = fbm(p * 0.008, 3);
+    vec3 col = mix(sand, red, blend);
+    float mesa = smoothstep(0.55, 0.6, fbm(p * 0.004, 4));
+    col = mix(col, vec3(0.6, 0.35, 0.25), mesa);
+    return col;
+  } else if (u_biome < 2.5) {
+    // Oceanic
+    if (h < 0.0) return mix(vec3(0.02, 0.1, 0.25), vec3(0.05, 0.2, 0.35), smoothstep(-100.0, 0.0, h));
+    float beach = 1.0 - smoothstep(0.0, 20.0, h);
+    vec3 col = mix(vec3(0.15, 0.4, 0.12), vec3(0.85, 0.8, 0.6), beach);
+    float palm = smoothstep(15.0, 40.0, h) * (1.0 - smoothstep(40.0, 80.0, h));
+    col = mix(col, vec3(0.1, 0.35, 0.08), palm * 0.5);
+    return col;
+  } else {
+    // Volcanic
+    vec3 basalt = vec3(0.15, 0.13, 0.12);
+    vec3 lava = vec3(1.0, 0.3, 0.05);
+    float hot = smoothstep(0.65, 0.8, fbm(p * 0.005, 3));
+    float ash = fbm(p * 0.01, 4);
+    vec3 col = mix(basalt, vec3(0.25, 0.2, 0.18), ash);
+    col = mix(col, lava, hot * 0.6);
+    return col;
+  }
+}
+
+// --- Sky ---
+vec3 skyColor(vec3 rd, vec3 sunDir) {
+  float sun = u_timeOfDay * 6.28318;
+  float sunY = sunDir.y;
+
+  // Base sky gradient
+  vec3 zenith, horizon;
+  if (sunY > 0.05) {
+    zenith = vec3(0.15, 0.3, 0.65);
+    horizon = vec3(0.5, 0.65, 0.8);
+  } else if (sunY > -0.1) {
+    // Sunset/sunrise
+    zenith = vec3(0.1, 0.15, 0.4);
+    horizon = vec3(0.9, 0.4, 0.15);
+  } else {
+    zenith = vec3(0.01, 0.01, 0.03);
+    horizon = vec3(0.02, 0.02, 0.06);
+  }
+
+  float t = pow(1.0 - max(rd.y, 0.0), 3.0);
+  vec3 sky = mix(zenith, horizon, t);
+
+  // Sun disc
+  float sunDot = max(dot(rd, sunDir), 0.0);
+  sky += vec3(1.0, 0.9, 0.7) * pow(sunDot, 256.0) * 2.0;
+  sky += vec3(1.0, 0.6, 0.3) * pow(sunDot, 8.0) * 0.3;
+
+  // Stars at night
+  if (sunY < 0.0) {
+    float starField = hash(floor(rd.xz * 500.0 / max(rd.y, 0.01)));
+    float star = smoothstep(0.997, 1.0, starField) * smoothstep(-0.3, -0.05, -sunY);
+    sky += vec3(star);
+  }
+
+  // Fog at horizon
+  float fog = exp(-max(rd.y, 0.0) * 5.0);
+  vec3 fogCol = mix(horizon, vec3(0.6, 0.65, 0.7), 0.3);
+  sky = mix(sky, fogCol, fog * 0.5);
+
+  return sky;
+}
+
+// --- Cloud layer ---
+float clouds(vec2 p) {
+  float c = fbm(p * 0.0003 + u_time * 0.5, 5);
+  c = smoothstep(0.4, 0.7, c);
+  return c;
+}
+
+// --- Raymarch terrain ---
+float raymarchTerrain(vec3 ro, vec3 rd, out float t) {
+  t = 1.0;
+  float dt = 1.0;
+  float lastH = 0.0, lastY = 0.0;
+
+  for (int i = 0; i < 200; i++) {
+    t += dt;
+    if (t > 5000.0) return -1.0;
+    vec3 p = ro + rd * t;
+    float h = terrainH(p.xz);
+
+    if (p.y < h) {
+      // Binary search refinement
+      float ta = t - dt, tb = t;
+      for (int j = 0; j < 6; j++) {
+        float tm = (ta + tb) * 0.5;
+        vec3 pm = ro + rd * tm;
+        if (pm.y < terrainH(pm.xz)) tb = tm; else ta = tm;
+      }
+      t = (ta + tb) * 0.5;
+      return t;
+    }
+
+    // Adaptive step size
+    dt = max(1.0, (p.y - h) * 0.3);
+    lastH = h;
+    lastY = p.y;
+  }
+  return -1.0;
+}
+
+// --- Water ---
+float waterH(vec2 p) {
+  if (u_biome < 2.5 && u_biome >= 1.5) return 0.0; // ocean sea level
+  return -999.0; // no water for other biomes
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - u_res * 0.5) / u_res.y;
+
+  // Sun direction from time of day
+  float sunAngle = u_timeOfDay * 6.28318 - 1.5708;
+  vec3 sunDir = normalize(vec3(cos(sunAngle) * 0.5, sin(sunAngle), cos(sunAngle)));
+
+  // Ray direction
+  vec3 rd = normalize(u_camRot * vec3(uv.x, uv.y, -1.2));
+
+  // Sky
+  vec3 col = skyColor(rd, sunDir);
+
+  // Terrain raymarch
+  float t;
+  float hit = raymarchTerrain(u_camPos, rd, t);
+
+  if (hit > 0.0) {
+    vec3 p = u_camPos + rd * t;
+    vec3 n = terrainNormal(p.xz);
+    float h = terrainH(p.xz);
+
+    // Lighting
+    float diff = max(dot(n, sunDir), 0.0);
+    float amb = 0.15 + 0.05 * n.y;
+    vec3 sunCol = sunDir.y > 0.0 ? vec3(1.0, 0.95, 0.85) : vec3(0.3, 0.2, 0.15);
+
+    // Shadow (simplified)
+    float shadow = 1.0;
+    vec3 sp = p + n * 2.0;
+    float st;
+    if (raymarchTerrain(sp, sunDir, st) > 0.0 && st < 200.0) shadow = 0.3;
+
+    vec3 surfCol = terrainColor(p.xz, h, n);
+    col = surfCol * (amb + diff * shadow * sunCol);
+
+    // Specular for water
+    if (u_biome >= 1.5 && u_biome < 2.5 && h < 0.0) {
+      vec3 refl = reflect(-sunDir, vec3(0,1,0));
+      float spec = pow(max(dot(rd, refl), 0.0), 64.0);
+      col += vec3(1.0, 0.9, 0.7) * spec * 0.5;
+    }
+
+    // Volcanic glow
+    if (u_biome >= 2.5) {
+      float hot = smoothstep(0.65, 0.8, fbm(p.xz * 0.005, 3));
+      col += vec3(1.0, 0.3, 0.05) * hot * 0.5 * (1.0 - smoothstep(0.0, 0.2, sunDir.y));
+    }
+
+    // Distance fog
+    float fogDist = 1.0 - exp(-t * 0.0003);
+    vec3 fogCol = skyColor(rd, sunDir);
+    col = mix(col, fogCol, fogDist);
+  }
+
+  // Cloud shadows on terrain (top-down)
+  if (hit > 0.0) {
+    vec3 p = u_camPos + rd * t;
+    float c = clouds(p.xz + sunDir.xz * 200.0);
+    col *= 1.0 - c * 0.3;
+  }
+
+  // Cloud layer (at altitude 800)
+  float cloudAlt = 800.0;
+  if (rd.y > 0.01 && u_camPos.y < cloudAlt) {
+    float ct = (cloudAlt - u_camPos.y) / rd.y;
+    if (ct > 0.0 && (hit < 0.0 || ct < t)) {
+      vec3 cp = u_camPos + rd * ct;
+      float c = clouds(cp.xz);
+      vec3 cloudCol = mix(vec3(0.8, 0.82, 0.85), vec3(1.0, 0.95, 0.9), max(dot(sunDir, vec3(0,1,0)), 0.0));
+      float cloudFog = 1.0 - exp(-ct * 0.0002);
+      col = mix(col, cloudCol, c * (1.0 - cloudFog) * 0.7);
+    }
+  } else if (rd.y < -0.01 && u_camPos.y > cloudAlt) {
+    float ct = (cloudAlt - u_camPos.y) / rd.y;
+    if (ct > 0.0) {
+      vec3 cp = u_camPos + rd * ct;
+      float c = clouds(cp.xz);
+      vec3 cloudCol = vec3(0.9, 0.92, 0.95);
+      col = mix(col, cloudCol, c * 0.6);
+    }
+  }
+
+  // Tone mapping
+  col = col / (col + 0.5);
+  col = pow(col, vec3(0.85));
+
+  // Vignette
+  vec2 vig = v_uv * 2.0 - 1.0;
+  col *= 1.0 - dot(vig, vig) * 0.15;
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+// Compile shaders
+function createShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+const vs = createShader(gl.VERTEX_SHADER, VS);
+const fs = createShader(gl.FRAGMENT_SHADER, FS);
+const prog = gl.createProgram();
+gl.attachShader(prog, vs);
+gl.attachShader(prog, fs);
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+// Fullscreen quad
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+// Uniforms
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uTimeOfDay = gl.getUniformLocation(prog, 'u_timeOfDay');
+const uCamPos = gl.getUniformLocation(prog, 'u_camPos');
+const uCamRot = gl.getUniformLocation(prog, 'u_camRot');
+const uRes = gl.getUniformLocation(prog, 'u_res');
+const uBiome = gl.getUniformLocation(prog, 'u_biome');
+
+// Camera rotation matrix from pitch/yaw/roll
+function camMatrix(p, y, r) {
+  const cp = Math.cos(p), sp = Math.sin(p);
+  const cy = Math.cos(y), sy = Math.sin(y);
+  const cr = Math.cos(r), sr = Math.sin(r);
+  // Yaw * Pitch * Roll
+  return [
+    cy*cr + sy*sp*sr, cp*sr, -sy*cr + cy*sp*sr,
+    -cy*sr + sy*sp*cr, cp*cr, sy*sr + cy*sp*cr,
+    sy*cp, -sp, cy*cp
+  ];
+}
+
+// Input
+document.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === ' ') { e.preventDefault(); toggleAuto(); }
+  if (e.key >= '1' && e.key <= '4') { biome = parseInt(e.key) - 1; camPos[1] = 300; }
+});
+document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+// Mouse look (click to lock pointer in manual mode)
+canvas.addEventListener('click', () => {
+  if (flying && !autopilot) canvas.requestPointerLock();
+});
+document.addEventListener('mousemove', e => {
+  if (document.pointerLockElement === canvas && !autopilot) {
+    yaw += e.movementX * 0.002;
+    pitch -= e.movementY * 0.002;
+  }
+});
+
+// Touch controls
+let touchStartX = 0, touchStartY = 0, touching = false;
+canvas.addEventListener('touchstart', e => {
+  if (!flying) return;
+  touching = true;
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  if (!touching) return;
+  const dx = e.touches[0].clientX - touchStartX;
+  const dy = e.touches[0].clientY - touchStartY;
+  yaw += dx * 0.003;
+  pitch -= dy * 0.003;
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+  autopilot = false;
+  document.getElementById('autoBtn').classList.remove('active');
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener('touchend', () => { touching = false; });
+
+document.getElementById('start').addEventListener('click', () => {
+  flying = true;
+  document.getElementById('start').style.display = 'none';
+  document.getElementById('hud').style.display = 'flex';
+});
+
+function toggleAuto() {
+  autopilot = !autopilot;
+  document.getElementById('autoBtn').classList.toggle('active', autopilot);
+}
+document.getElementById('autoBtn').classList.add('active');
+
+function cycleBiome() {
+  biome = (biome + 1) % 4;
+  // Reset altitude when changing biome
+  camPos[1] = 300;
+}
+
+function cycleTime() {
+  timeOfDay = (timeOfDay + 0.125) % 1.0;
+}
+
+// Compass
+const compassCanvas = document.getElementById('compass');
+const ctx = compassCanvas.getContext('2d');
+compassCanvas.width = 160; compassCanvas.height = 160;
+
+function drawCompass() {
+  const cx = 80, cy = 80, r = 35;
+  ctx.clearRect(0, 0, 160, 160);
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // Ring
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(180,220,255,0.2)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Cardinal directions (rotated by yaw)
+  ctx.save();
+  ctx.rotate(-yaw);
+  const dirs = ['N', 'E', 'S', 'W'];
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2;
+    const dx = Math.sin(a) * (r + 12);
+    const dy = -Math.cos(a) * (r + 12);
+    ctx.fillStyle = i === 0 ? 'rgba(255,100,100,0.7)' : 'rgba(180,220,255,0.4)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(dirs[i], dx, dy);
+  }
+  ctx.restore();
+
+  // Heading arrow (always points up)
+  ctx.beginPath();
+  ctx.moveTo(0, -r + 8);
+  ctx.lineTo(-5, -r + 18);
+  ctx.lineTo(5, -r + 18);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(100,200,255,0.6)';
+  ctx.fill();
+
+  // Pitch indicator (horizon line)
+  const pitchY = pitch * r * 2;
+  ctx.beginPath();
+  ctx.moveTo(-r + 5, pitchY);
+  ctx.lineTo(r - 5, pitchY);
+  ctx.strokeStyle = 'rgba(180,220,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Roll indicator
+  ctx.save();
+  ctx.rotate(roll);
+  ctx.beginPath();
+  ctx.moveTo(-15, 0);
+  ctx.lineTo(15, 0);
+  ctx.strokeStyle = 'rgba(100,200,255,0.4)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Wings
+  ctx.beginPath();
+  ctx.moveTo(-5, -3);
+  ctx.lineTo(0, -6);
+  ctx.lineTo(5, -3);
+  ctx.strokeStyle = 'rgba(100,200,255,0.5)';
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// Main loop
+let lastTime = 0;
+let autoYawTarget = 0, autoYawTimer = 0;
+
+function frame(now) {
+  if (!flying) { requestAnimationFrame(frame); return; }
+  if (document.hidden) { requestAnimationFrame(frame); lastTime = now; return; }
+
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  // Controls
+  const pitchRate = 1.2, rollRate = 1.5, yawRate = 1.0;
+
+  if (autopilot) {
+    // Gentle meandering flight
+    autoYawTimer -= dt;
+    if (autoYawTimer <= 0) {
+      autoYawTarget = (Math.random() - 0.5) * 0.3;
+      autoYawTimer = 5 + Math.random() * 10;
+    }
+    yaw += autoYawTarget * dt * 0.3;
+
+    // Maintain altitude ~200-400m above terrain
+    const groundH = getTerrainHeight(camPos[0], camPos[2]);
+    const targetAlt = groundH + 250;
+    const altDiff = targetAlt - camPos[1];
+    const targetPitch = Math.max(-0.3, Math.min(0.3, altDiff * 0.002));
+    pitch += (targetPitch - pitch) * dt * 0.5;
+    roll *= 0.95; // level out
+
+    speed = 80;
+  } else {
+    if (keys['w'] || keys['arrowup']) pitch -= pitchRate * dt;
+    if (keys['s'] || keys['arrowdown']) pitch += pitchRate * dt;
+    if (keys['a'] || keys['arrowleft']) roll -= rollRate * dt;
+    if (keys['d'] || keys['arrowright']) roll += rollRate * dt;
+    if (keys['q']) yaw -= yawRate * dt;
+    if (keys['e']) yaw += yawRate * dt;
+    if (keys['shift']) targetSpeed = Math.min(300, targetSpeed + 100 * dt);
+    if (keys['control']) targetSpeed = Math.max(20, targetSpeed - 100 * dt);
+  }
+
+  // Clamp pitch, dampen roll
+  pitch = Math.max(-1.2, Math.min(1.2, pitch));
+  if (!keys['a'] && !keys['d'] && !keys['arrowleft'] && !keys['arrowright'] && !autopilot) {
+    roll *= 0.97;
+  }
+
+  // Roll affects yaw (coordinated turn)
+  yaw += roll * dt * 0.5;
+
+  speed += (targetSpeed - speed) * dt * 2;
+
+  // Forward vector from yaw and pitch
+  const fwd = [
+    -Math.sin(yaw) * Math.cos(pitch),
+    Math.sin(pitch),
+    -Math.cos(yaw) * Math.cos(pitch)
+  ];
+
+  // Move camera
+  camPos[0] += fwd[0] * speed * dt;
+  camPos[1] += fwd[1] * speed * dt;
+  camPos[2] += fwd[2] * speed * dt;
+
+  // Prevent ground collision
+  const groundH = getTerrainHeight(camPos[0], camPos[2]);
+  const minAlt = groundH + 15;
+  if (camPos[1] < minAlt) {
+    camPos[1] = minAlt;
+    if (pitch < 0) pitch *= 0.9;
+  }
+
+  // Time of day slowly advances
+  timeOfDay += dt * 0.002;
+  if (timeOfDay > 1) timeOfDay -= 1;
+
+  // Render
+  gl.uniform1f(uTime, now * 0.001);
+  gl.uniform1f(uTimeOfDay, timeOfDay);
+  gl.uniform3f(uCamPos, camPos[0], camPos[1], camPos[2]);
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform1f(uBiome, biome);
+
+  const mat = camMatrix(pitch, yaw, roll);
+  gl.uniformMatrix3fv(uCamRot, false, mat);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // HUD
+  const heading = (((-yaw * 180 / Math.PI) % 360) + 360) % 360;
+  const alt = Math.round(camPos[1] - groundH);
+  document.getElementById('info').innerHTML =
+    `ALT: ${alt}m AGL | SPD: ${Math.round(speed)} | HDG: ${String(Math.round(heading)).padStart(3,'0')}° | ${biomeNames[biome]} | ${autopilot ? 'AUTO' : 'MANUAL'}`;
+
+  drawCompass();
+
+  requestAnimationFrame(frame);
+}
+
+// Approximate terrain height on CPU (must match shader)
+function hash2(x, y) {
+  return ((Math.sin(x * 127.1 + y * 311.7) * 43758.5453) % 1 + 1) % 1;
+}
+
+function noiseJS(px, py) {
+  const ix = Math.floor(px), iy = Math.floor(py);
+  const fx = px - ix, fy = py - iy;
+  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix, iy), b = hash2(ix+1, iy);
+  const c = hash2(ix, iy+1), d = hash2(ix+1, iy+1);
+  return a + (b-a)*sx + (c-a)*sy + (a-b-c+d)*sx*sy;
+}
+
+function fbmJS(px, py, octaves) {
+  let v = 0, a = 0.5;
+  for (let i = 0; i < octaves; i++) {
+    v += a * noiseJS(px, py);
+    const nx = 0.8*px + 0.6*py, ny = -0.6*px + 0.8*py;
+    px = nx * 2; py = ny * 2;
+    a *= 0.5;
+  }
+  return v;
+}
+
+function getTerrainHeight(x, z) {
+  if (biome === 0) {
+    // Alpine
+    let h = fbmJS(x*0.003, z*0.003, 7) * 500;
+    h += fbmJS(x*0.015, z*0.015, 4) * 60;
+    const ridge = Math.abs(fbmJS(x*0.006, z*0.006, 5) - 0.5) * 2;
+    h += ridge * ridge * 200;
+    return h;
+  } else if (biome === 1) {
+    // Desert
+    let h = fbmJS(x*0.002, z*0.002, 5) * 200;
+    const dune = Math.sin(x*0.01 + fbmJS(x*0.005, z*0.005, 3) * 3) * 0.5 + 0.5;
+    h += dune * dune * 80;
+    const mesa = fbmJS(x*0.004, z*0.004, 4) > 0.55 ? 1 : 0;
+    h += mesa * 150;
+    return h;
+  } else if (biome === 2) {
+    // Oceanic
+    let h = fbmJS(x*0.002, z*0.002, 6) * 300 - 100;
+    h += fbmJS(x*0.01, z*0.01, 4) * 40;
+    return Math.max(h, 0); // can't fly below sea level
+  } else {
+    // Volcanic
+    let h = fbmJS(x*0.003, z*0.003, 6) * 400;
+    const fx = ((x*0.001) % 1 + 1) % 1 - 0.5;
+    const fz = ((z*0.001) % 1 + 1) % 1 - 0.5;
+    let volcano = 1 - Math.sqrt(fx*fx + fz*fz) * 3;
+    volcano = Math.max(volcano, 0);
+    h += volcano * volcano * 300;
+    return h;
+  }
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

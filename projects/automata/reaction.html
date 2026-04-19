@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reaction-Diffusion</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+#ui {
+  position: fixed; top: 16px; left: 16px; z-index: 10;
+  font: 12px 'Courier New', monospace; color: #999;
+  pointer-events: none; user-select: none;
+}
+#ui h1 { font-size: 18px; color: #c792ea; letter-spacing: 2px; margin-bottom: 6px; }
+#controls {
+  position: fixed; top: 16px; right: 16px; z-index: 10;
+  font: 11px 'Courier New', monospace; color: #999;
+  display: flex; flex-direction: column; gap: 4px; max-width: 160px;
+}
+.btn {
+  background: rgba(15,15,30,0.8); border: 1px solid #333; color: #999;
+  padding: 5px 8px; cursor: pointer; font: inherit; text-align: left;
+  transition: all 0.2s;
+}
+.btn:hover { border-color: #c792ea; color: #c792ea; }
+.btn.active { border-color: #7fdbca; color: #7fdbca; }
+.slider-row { display: flex; align-items: center; gap: 4px; color: #666; font-size: 10px; }
+.slider-row input { flex: 1; }
+.slider-row .val { min-width: 36px; text-align: right; color: #999; }
+#back {
+  position: fixed; bottom: 16px; left: 16px; z-index: 10;
+  color: #555; text-decoration: none; font: 12px 'Courier New', monospace;
+}
+#back:hover { color: #c792ea; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h1>REACTION&middot;DIFFUSION</h1>
+  <div style="opacity:0.6">
+    Click to seed &middot; Scroll brush size<br>
+    <span id="fps">0</span> fps &middot; Gray-Scott model
+  </div>
+</div>
+<div id="controls">
+  <div id="presets"></div>
+  <div class="slider-row"><span>Feed</span><input type="range" id="feedSlider" min="0" max="100" value="55"><span class="val" id="feedVal">0.055</span></div>
+  <div class="slider-row"><span>Kill</span><input type="range" id="killSlider" min="0" max="100" value="62"><span class="val" id="killVal">0.062</span></div>
+  <div class="slider-row"><span>Steps</span><input type="range" id="stepsSlider" min="1" max="20" value="8"><span class="val" id="stepsVal">8</span></div>
+  <button class="btn" id="btnPalette">Palette: Coral</button>
+  <button class="btn" id="btnClear">Clear [C]</button>
+  <button class="btn" id="btnRandom">Random seed [R]</button>
+</div>
+<a id="back" href="/">&larr; Automata</a>
+
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { alpha: false });
+if (!gl) { document.body.innerHTML = '<p style="color:#f66;padding:2em">WebGL required</p>'; throw 'no gl'; }
+
+const halfFloat = gl.getExtension('OES_texture_half_float');
+const halfFloatLinear = gl.getExtension('OES_texture_half_float_linear');
+const texType = halfFloat ? halfFloat.HALF_FLOAT_OES : gl.UNSIGNED_BYTE;
+
+let W, H;
+const SIM_SCALE = 0.75; // sim resolution relative to screen
+
+function calcSize() {
+  const maxDim = 512;
+  const aspect = canvas.width / canvas.height;
+  if (aspect >= 1) { W = maxDim; H = Math.round(maxDim / aspect); }
+  else { H = maxDim; W = Math.round(maxDim * aspect); }
+}
+
+// Compile/link
+function compileS(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+
+function mkProg(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compileS(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compileS(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  const u = {};
+  for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i++) {
+    const info = gl.getActiveUniform(p, i);
+    u[info.name] = gl.getUniformLocation(p, info.name);
+  }
+  return { program: p, u };
+}
+
+const VS = `attribute vec2 a; varying vec2 v; void main(){ v=a*0.5+0.5; gl_Position=vec4(a,0,1); }`;
+
+// Gray-Scott step shader
+const stepFS = `
+precision highp float;
+varying vec2 v;
+uniform sampler2D state;
+uniform vec2 texel;
+uniform float feed;
+uniform float kill;
+uniform float dt;
+
+void main() {
+  vec4 C = texture2D(state, v);
+  float a = C.r, b = C.g;
+
+  // 5-point Laplacian
+  float La = -4.0 * a;
+  float Lb = -4.0 * b;
+  La += texture2D(state, v + vec2(texel.x, 0)).r;
+  La += texture2D(state, v - vec2(texel.x, 0)).r;
+  La += texture2D(state, v + vec2(0, texel.y)).r;
+  La += texture2D(state, v - vec2(0, texel.y)).r;
+  Lb += texture2D(state, v + vec2(texel.x, 0)).g;
+  Lb += texture2D(state, v - vec2(texel.x, 0)).g;
+  Lb += texture2D(state, v + vec2(0, texel.y)).g;
+  Lb += texture2D(state, v - vec2(0, texel.y)).g;
+
+  // Diagonal neighbours (weighted 0.05 each for smoother Laplacian)
+  La += 0.5 * (texture2D(state, v + texel).r + texture2D(state, v - texel).r +
+               texture2D(state, v + vec2(texel.x, -texel.y)).r + texture2D(state, v + vec2(-texel.x, texel.y)).r);
+  Lb += 0.5 * (texture2D(state, v + texel).g + texture2D(state, v - texel).g +
+               texture2D(state, v + vec2(texel.x, -texel.y)).g + texture2D(state, v + vec2(-texel.x, texel.y)).g);
+  La /= 6.0;
+  Lb /= 6.0;
+
+  float Da = 1.0;   // diffusion rate A
+  float Db = 0.5;   // diffusion rate B
+  float abb = a * b * b;
+
+  float newA = a + dt * (Da * La - abb + feed * (1.0 - a));
+  float newB = b + dt * (Db * Lb + abb - (kill + feed) * b);
+
+  gl_FragColor = vec4(clamp(newA, 0.0, 1.0), clamp(newB, 0.0, 1.0), 0.0, 1.0);
+}`;
+
+// Seed shader
+const seedFS = `
+precision highp float;
+varying vec2 v;
+uniform sampler2D state;
+uniform vec2 point;
+uniform float radius;
+uniform float aspectRatio;
+void main() {
+  vec2 d = v - point;
+  d.x *= aspectRatio;
+  float dist = length(d);
+  vec4 c = texture2D(state, v);
+  if (dist < radius) {
+    c.r = 0.0;
+    c.g = 1.0;
+  }
+  gl_FragColor = c;
+}`;
+
+// Display shader with palettes
+const displayFS = `
+precision highp float;
+varying vec2 v;
+uniform sampler2D state;
+uniform int palette;
+
+vec3 coral(float a, float b) {
+  vec3 c1 = vec3(0.05, 0.02, 0.1);
+  vec3 c2 = vec3(0.9, 0.3, 0.4);
+  vec3 c3 = vec3(1.0, 0.85, 0.5);
+  float t = b * 2.5;
+  vec3 c = mix(c1, c2, smoothstep(0.0, 0.4, t));
+  c = mix(c, c3, smoothstep(0.4, 1.0, t));
+  c *= 1.0 - a * 0.3;
+  return c;
+}
+
+vec3 ocean(float a, float b) {
+  vec3 deep = vec3(0.0, 0.05, 0.15);
+  vec3 mid = vec3(0.0, 0.3, 0.5);
+  vec3 bright = vec3(0.3, 0.9, 0.8);
+  float t = b * 3.0;
+  vec3 c = mix(deep, mid, smoothstep(0.0, 0.3, t));
+  c = mix(c, bright, smoothstep(0.3, 0.8, t));
+  return c;
+}
+
+vec3 fire(float a, float b) {
+  vec3 dark = vec3(0.05, 0.0, 0.0);
+  vec3 red = vec3(0.8, 0.1, 0.0);
+  vec3 gold = vec3(1.0, 0.8, 0.2);
+  vec3 white = vec3(1.0, 1.0, 0.9);
+  float t = b * 3.0;
+  vec3 c = mix(dark, red, smoothstep(0.0, 0.2, t));
+  c = mix(c, gold, smoothstep(0.2, 0.5, t));
+  c = mix(c, white, smoothstep(0.6, 1.0, t));
+  return c;
+}
+
+vec3 mono(float a, float b) {
+  float v = b * 3.0;
+  return vec3(v);
+}
+
+vec3 alien(float a, float b) {
+  vec3 c1 = vec3(0.0, 0.05, 0.0);
+  vec3 c2 = vec3(0.0, 0.6, 0.2);
+  vec3 c3 = vec3(0.8, 1.0, 0.3);
+  float t = b * 3.0;
+  vec3 c = mix(c1, c2, smoothstep(0.0, 0.3, t));
+  c = mix(c, c3, smoothstep(0.3, 0.8, t));
+  return c;
+}
+
+void main() {
+  vec4 s = texture2D(state, v);
+  float a = s.r, b = s.g;
+  vec3 col;
+  if (palette == 0) col = coral(a, b);
+  else if (palette == 1) col = ocean(a, b);
+  else if (palette == 2) col = fire(a, b);
+  else if (palette == 3) col = mono(a, b);
+  else col = alien(a, b);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+// Build programs
+const stepProg = mkProg(VS, stepFS);
+const seedProg = mkProg(VS, seedFS);
+const displayProg = mkProg(VS, displayFS);
+
+// Quad
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+
+function bindQuad(prog) {
+  const loc = gl.getAttribLocation(prog.program, 'a');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+}
+
+// FBOs
+function createFBO(w, h) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, halfFloatLinear ? gl.LINEAR : gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, halfFloatLinear ? gl.LINEAR : gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, texType, null);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fbo, w, h };
+}
+
+let stateA, stateB;
+
+function initState() {
+  stateA = createFBO(W, H);
+  stateB = createFBO(W, H);
+
+  // Initialize with A=1, B=0 everywhere
+  const pixels = new Uint8Array(W * H * 4);
+  for (let i = 0; i < W * H; i++) {
+    pixels[i * 4] = 255;     // A = 1.0
+    pixels[i * 4 + 1] = 0;   // B = 0.0
+    pixels[i * 4 + 2] = 0;
+    pixels[i * 4 + 3] = 255;
+  }
+  // If using half float, we need to init via a shader instead
+  // For simplicity, create a UNSIGNED_BYTE texture and copy
+  const initTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, initTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+  // Copy to stateA via draw
+  const copyFS = `precision highp float; varying vec2 v; uniform sampler2D t;
+    void main() { gl_FragColor = texture2D(t, v); }`;
+  const copyProg = mkProg(VS, copyFS);
+  gl.useProgram(copyProg.program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  bindQuad(copyProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, initTex);
+  gl.uniform1i(copyProg.u.t, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, stateA.fbo);
+  gl.viewport(0, 0, W, H);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteTexture(initTex);
+}
+
+// Config
+const config = {
+  feed: 0.055,
+  kill: 0.062,
+  stepsPerFrame: 8,
+  palette: 0,
+  brushRadius: 0.02,
+};
+
+const paletteNames = ['Coral', 'Ocean', 'Fire', 'Mono', 'Alien'];
+
+// Presets: different feed/kill values produce different patterns
+const presets = [
+  { name: 'Mitosis', feed: 0.0367, kill: 0.0649 },
+  { name: 'Coral', feed: 0.055, kill: 0.062 },
+  { name: 'Maze', feed: 0.029, kill: 0.057 },
+  { name: 'Spots', feed: 0.030, kill: 0.062 },
+  { name: 'Worms', feed: 0.078, kill: 0.061 },
+  { name: 'Waves', feed: 0.014, kill: 0.045 },
+  { name: 'Bubbles', feed: 0.012, kill: 0.050 },
+  { name: 'Solitons', feed: 0.030, kill: 0.055 },
+];
+
+// Build preset buttons
+const presetDiv = document.getElementById('presets');
+presets.forEach((p, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'btn' + (i === 1 ? ' active' : '');
+  btn.textContent = p.name;
+  btn.addEventListener('click', () => {
+    config.feed = p.feed;
+    config.kill = p.kill;
+    document.getElementById('feedSlider').value = Math.round(p.feed * 1000);
+    document.getElementById('killSlider').value = Math.round(p.kill * 1000);
+    document.getElementById('feedVal').textContent = p.feed.toFixed(3);
+    document.getElementById('killVal').textContent = p.kill.toFixed(3);
+    presetDiv.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    clearAndSeed();
+  });
+  presetDiv.appendChild(btn);
+});
+
+// Sliders
+document.getElementById('feedSlider').addEventListener('input', e => {
+  config.feed = e.target.value / 1000;
+  document.getElementById('feedVal').textContent = config.feed.toFixed(3);
+  presetDiv.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+});
+document.getElementById('killSlider').addEventListener('input', e => {
+  config.kill = e.target.value / 1000;
+  document.getElementById('killVal').textContent = config.kill.toFixed(3);
+  presetDiv.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+});
+document.getElementById('stepsSlider').addEventListener('input', e => {
+  config.stepsPerFrame = parseInt(e.target.value);
+  document.getElementById('stepsVal').textContent = config.stepsPerFrame;
+});
+
+// Palette
+document.getElementById('btnPalette').addEventListener('click', () => {
+  config.palette = (config.palette + 1) % paletteNames.length;
+  document.getElementById('btnPalette').textContent = 'Palette: ' + paletteNames[config.palette];
+});
+
+// Seed B chemical at a point
+function seedAt(x, y) {
+  gl.useProgram(seedProg.program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  bindQuad(seedProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, stateA.tex);
+  gl.uniform1i(seedProg.u.state, 0);
+  gl.uniform2f(seedProg.u.point, x, y);
+  gl.uniform1f(seedProg.u.radius, config.brushRadius);
+  gl.uniform1f(seedProg.u.aspectRatio, canvas.width / canvas.height);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, stateB.fbo);
+  gl.viewport(0, 0, W, H);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  // Swap
+  const t = stateA; stateA = stateB; stateB = t;
+}
+
+function randomSeed() {
+  const n = 3 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < n; i++) {
+    seedAt(0.2 + Math.random() * 0.6, 0.2 + Math.random() * 0.6);
+  }
+}
+
+function clearAndSeed() {
+  initState();
+  randomSeed();
+}
+
+// Mouse
+let mouseDown = false;
+canvas.addEventListener('mousedown', e => {
+  mouseDown = true;
+  const rect = canvas.getBoundingClientRect();
+  seedAt(e.clientX / rect.width, 1.0 - e.clientY / rect.height);
+});
+canvas.addEventListener('mousemove', e => {
+  if (!mouseDown) return;
+  const rect = canvas.getBoundingClientRect();
+  seedAt(e.clientX / rect.width, 1.0 - e.clientY / rect.height);
+});
+canvas.addEventListener('mouseup', () => { mouseDown = false; });
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches[0];
+  seedAt(t.clientX / rect.width, 1.0 - t.clientY / rect.height);
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches[0];
+  seedAt(t.clientX / rect.width, 1.0 - t.clientY / rect.height);
+}, { passive: false });
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  config.brushRadius *= e.deltaY > 0 ? 1.15 : 0.87;
+  config.brushRadius = Math.max(0.005, Math.min(0.08, config.brushRadius));
+}, { passive: false });
+
+// Clear / random
+document.getElementById('btnClear').addEventListener('click', clearAndSeed);
+document.getElementById('btnRandom').addEventListener('click', () => { randomSeed(); });
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'c' || e.key === 'C') clearAndSeed();
+  if (e.key === 'r' || e.key === 'R') randomSeed();
+  if (e.key === 'p' || e.key === 'P') document.getElementById('btnPalette').click();
+  if (e.key >= '1' && e.key <= '8') {
+    const idx = parseInt(e.key) - 1;
+    if (idx < presets.length) presetDiv.children[idx].click();
+  }
+});
+
+// Step simulation
+function simStep() {
+  gl.useProgram(stepProg.program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  bindQuad(stepProg);
+  gl.uniform2f(stepProg.u.texel, 1.0 / W, 1.0 / H);
+  gl.uniform1f(stepProg.u.feed, config.feed);
+  gl.uniform1f(stepProg.u.kill, config.kill);
+  gl.uniform1f(stepProg.u.dt, 1.0);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, stateA.tex);
+  gl.uniform1i(stepProg.u.state, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, stateB.fbo);
+  gl.viewport(0, 0, W, H);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  const t = stateA; stateA = stateB; stateB = t;
+}
+
+// Render
+function render() {
+  gl.useProgram(displayProg.program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  bindQuad(displayProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, stateA.tex);
+  gl.uniform1i(displayProg.u.state, 0);
+  gl.uniform1i(displayProg.u.palette, config.palette);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+let fc = 0, ft = performance.now();
+
+function loop(t) {
+  if (document.hidden) { requestAnimationFrame(loop); return; }
+
+  for (let i = 0; i < config.stepsPerFrame; i++) simStep();
+  render();
+
+  fc++;
+  if (t - ft > 1000) {
+    document.getElementById('fps').textContent = fc;
+    fc = 0; ft = t;
+  }
+  requestAnimationFrame(loop);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) requestAnimationFrame(loop);
+});
+
+// Resize
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  calcSize();
+  initState();
+  randomSeed();
+}
+window.addEventListener('resize', resize);
+
+// Init
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

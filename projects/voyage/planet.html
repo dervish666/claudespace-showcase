@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planet</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; cursor: grab; }
+canvas:active { cursor: grabbing; }
+#ui {
+  position: fixed; top: 16px; left: 16px; z-index: 10;
+  font: 12px 'Courier New', monospace; color: #8899aa;
+  pointer-events: none; user-select: none;
+}
+#ui h1 { font-size: 20px; color: #7fdbca; letter-spacing: 3px; margin-bottom: 6px; }
+#controls {
+  position: fixed; top: 16px; right: 16px; z-index: 10;
+  font: 11px 'Courier New', monospace; color: #8899aa;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ctrl {
+  background: rgba(10,10,20,0.7); border: 1px solid #222; color: #8899aa;
+  padding: 5px 8px; cursor: pointer; font: inherit; text-align: left; transition: all 0.2s;
+}
+.ctrl:hover { border-color: #7fdbca; color: #7fdbca; }
+.ctrl.active { border-color: #c792ea; color: #c792ea; }
+#back {
+  position: fixed; bottom: 16px; left: 16px; z-index: 10;
+  color: #555; text-decoration: none; font: 12px 'Courier New', monospace;
+}
+#back:hover { color: #7fdbca; }
+#info {
+  position: fixed; bottom: 16px; right: 16px; z-index: 10;
+  color: #444; font: 11px 'Courier New', monospace; text-align: right;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h1>PLANET</h1>
+  <div>Drag to orbit &middot; Scroll to zoom</div>
+</div>
+<div id="controls">
+  <button class="ctrl" id="btnTerrain">Terrain: Earth</button>
+  <button class="ctrl" id="btnAtmo">Atmosphere: ON</button>
+  <button class="ctrl" id="btnClouds">Clouds: ON</button>
+  <button class="ctrl" id="btnOcean">Ocean: ON</button>
+  <button class="ctrl" id="btnRotate">Auto-rotate: ON</button>
+  <button class="ctrl" id="btnStar">Star light: Day</button>
+</div>
+<a id="back" href="/">&larr; Voyage</a>
+<div id="info"><span id="fps">0</span> fps</div>
+
+<script>
+'use strict';
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { alpha: false, antialias: false });
+if (!gl) { document.body.innerHTML = '<p style="color:#f66;padding:2em">WebGL required</p>'; throw 'no gl'; }
+
+// State
+let camDist = 3.5;
+let camTheta = 0.3; // polar angle from pole
+let camPhi = 0.0;   // azimuthal
+let autoRotate = true;
+let showAtmo = true;
+let showClouds = true;
+let showOcean = true;
+let starAngle = 0.8; // angle of star light
+let terrainType = 0; // 0=earth, 1=mars, 2=ice, 3=volcanic, 4=alien
+const terrainNames = ['Earth', 'Mars', 'Ice', 'Volcanic', 'Alien'];
+const starNames = ['Day', 'Sunset', 'Night', 'Dawn'];
+let starMode = 0;
+
+// Mouse
+let dragging = false;
+let lastMX = 0, lastMY = 0;
+
+canvas.addEventListener('mousedown', e => {
+  dragging = true; lastMX = e.clientX; lastMY = e.clientY;
+});
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastMX;
+  const dy = e.clientY - lastMY;
+  camPhi -= dx * 0.005;
+  camTheta = Math.max(0.1, Math.min(Math.PI - 0.1, camTheta + dy * 0.005));
+  lastMX = e.clientX; lastMY = e.clientY;
+});
+canvas.addEventListener('mouseup', () => { dragging = false; });
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  camDist *= e.deltaY > 0 ? 1.08 : 0.93;
+  camDist = Math.max(1.5, Math.min(10.0, camDist));
+}, { passive: false });
+
+// Touch
+let lastTouchDist = 0;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    dragging = true;
+    lastMX = e.touches[0].clientX;
+    lastMY = e.touches[0].clientY;
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[1].clientX - e.touches[0].clientX;
+    const dy = e.touches[1].clientY - e.touches[0].clientY;
+    lastTouchDist = Math.sqrt(dx*dx + dy*dy);
+  }
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && dragging) {
+    const dx = e.touches[0].clientX - lastMX;
+    const dy = e.touches[0].clientY - lastMY;
+    camPhi -= dx * 0.005;
+    camTheta = Math.max(0.1, Math.min(Math.PI - 0.1, camTheta + dy * 0.005));
+    lastMX = e.touches[0].clientX;
+    lastMY = e.touches[0].clientY;
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[1].clientX - e.touches[0].clientX;
+    const dy = e.touches[1].clientY - e.touches[0].clientY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (lastTouchDist > 0) {
+      camDist *= lastTouchDist / dist;
+      camDist = Math.max(1.5, Math.min(10.0, camDist));
+    }
+    lastTouchDist = dist;
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', () => { dragging = false; lastTouchDist = 0; });
+
+// Shader compilation
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s)); return null;
+  }
+  return s;
+}
+
+function link(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+  const u = {};
+  for (let i = 0; i < gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i++) {
+    const info = gl.getActiveUniform(p, i);
+    u[info.name] = gl.getUniformLocation(p, info.name);
+  }
+  return { program: p, u };
+}
+
+const VS = `
+attribute vec2 a;
+varying vec2 v;
+void main() { v = a; gl_Position = vec4(a, 0, 1); }`;
+
+const FS = `
+precision highp float;
+varying vec2 v;
+uniform vec2 res;
+uniform float time;
+uniform vec3 camPos;
+uniform mat3 camRot;
+uniform vec3 starDir;
+uniform int terrain;
+uniform bool atmosphere;
+uniform bool clouds;
+uniform bool ocean;
+
+#define PI 3.14159265
+#define MAX_STEPS 128
+#define PLANET_R 1.0
+#define ATMO_R 1.15
+#define CLOUD_R 1.02
+#define OCEAN_R 1.0
+
+// Noise functions
+float hash(vec3 p) {
+  p = fract(p * vec3(443.897, 441.423, 437.195));
+  p += dot(p, p.yzx + 19.19);
+  return fract((p.x + p.y) * p.z);
+}
+
+float noise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x),
+        mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+    mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+        mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y),
+    f.z
+  );
+}
+
+float fbm(vec3 p, int octaves) {
+  float v = 0.0, a = 0.5;
+  vec3 shift = vec3(100.0);
+  for (int i = 0; i < 6; i++) {
+    if (i >= octaves) break;
+    v += a * noise3(p);
+    p = p * 2.0 + shift;
+    a *= 0.5;
+  }
+  return v;
+}
+
+// Terrain height based on planet type
+float terrainHeight(vec3 p) {
+  float h;
+  if (terrain == 0) {
+    // Earth: continents and mountains
+    h = fbm(p * 2.0, 6) * 0.08;
+    float mountains = max(0.0, fbm(p * 8.0 + 50.0, 4) - 0.4) * 0.15;
+    h += mountains;
+  } else if (terrain == 1) {
+    // Mars: cratered, tall mountains
+    h = fbm(p * 1.5, 5) * 0.12;
+    float crater = 1.0 - smoothstep(0.0, 0.15, length(fract(p * 3.0) - 0.5));
+    h -= crater * 0.04;
+    h += max(0.0, fbm(p * 6.0 + 30.0, 3) - 0.5) * 0.2;
+  } else if (terrain == 2) {
+    // Ice: smooth with ridges
+    h = fbm(p * 3.0, 4) * 0.04;
+    h += abs(fbm(p * 7.0 + 20.0, 3) - 0.5) * 0.06;
+  } else if (terrain == 3) {
+    // Volcanic: rough, lava flows
+    h = fbm(p * 2.5, 6) * 0.1;
+    float volcano = max(0.0, 0.5 - length(fract(p * 1.5) - 0.5)) * 0.3;
+    h += volcano;
+  } else {
+    // Alien: exotic terrain
+    float warp = fbm(p * 1.0, 3);
+    h = fbm(p * 3.0 + warp * 2.0, 5) * 0.1;
+    h += sin(p.x * 10.0 + p.y * 8.0) * 0.01;
+  }
+  return h;
+}
+
+// Terrain color
+vec3 terrainColor(vec3 p, float h, vec3 n) {
+  float slope = 1.0 - dot(n, normalize(p));
+  if (terrain == 0) {
+    // Earth
+    vec3 water = vec3(0.05, 0.15, 0.4);
+    vec3 sand = vec3(0.76, 0.70, 0.50);
+    vec3 grass = vec3(0.15, 0.35, 0.10);
+    vec3 rock = vec3(0.35, 0.30, 0.25);
+    vec3 snow = vec3(0.9, 0.92, 0.95);
+    float elev = h / 0.15;
+    vec3 c = mix(grass, rock, smoothstep(0.3, 0.6, elev));
+    c = mix(c, snow, smoothstep(0.6, 0.85, elev));
+    c = mix(c, sand, smoothstep(0.05, 0.0, elev));
+    c = mix(c, rock, smoothstep(0.3, 0.6, slope));
+    // Variation
+    c *= 0.8 + 0.4 * fbm(p * 20.0, 2);
+    return c;
+  } else if (terrain == 1) {
+    // Mars
+    vec3 rust = vec3(0.6, 0.25, 0.1);
+    vec3 dust = vec3(0.7, 0.45, 0.25);
+    vec3 dark = vec3(0.3, 0.15, 0.08);
+    float n2 = fbm(p * 15.0, 2);
+    vec3 c = mix(rust, dust, n2);
+    c = mix(c, dark, smoothstep(0.5, 0.8, h / 0.15));
+    return c;
+  } else if (terrain == 2) {
+    // Ice
+    vec3 ice = vec3(0.7, 0.85, 0.95);
+    vec3 blue = vec3(0.3, 0.5, 0.8);
+    vec3 white = vec3(0.95, 0.97, 1.0);
+    float n2 = fbm(p * 12.0, 2);
+    vec3 c = mix(ice, blue, n2 * 0.5);
+    c = mix(c, white, smoothstep(0.02, 0.05, h / 0.1));
+    return c;
+  } else if (terrain == 3) {
+    // Volcanic
+    vec3 basalt = vec3(0.15, 0.12, 0.1);
+    vec3 lava = vec3(1.0, 0.3, 0.0);
+    vec3 ash = vec3(0.25, 0.22, 0.2);
+    float heat = max(0.0, 0.5 - length(fract(p * 1.5) - 0.5)) * 2.0;
+    float n2 = fbm(p * 10.0, 2);
+    vec3 c = mix(basalt, ash, n2);
+    c = mix(c, lava, heat * 0.5);
+    return c;
+  } else {
+    // Alien
+    vec3 purple = vec3(0.3, 0.1, 0.5);
+    vec3 teal = vec3(0.1, 0.5, 0.4);
+    vec3 gold = vec3(0.8, 0.6, 0.1);
+    float n2 = fbm(p * 8.0, 3);
+    vec3 c = mix(purple, teal, n2);
+    c = mix(c, gold, smoothstep(0.4, 0.6, h / 0.1));
+    return c;
+  }
+}
+
+// Ray-sphere intersection
+vec2 raySphere(vec3 ro, vec3 rd, float r) {
+  float b = dot(ro, rd);
+  float c = dot(ro, ro) - r * r;
+  float d = b * b - c;
+  if (d < 0.0) return vec2(-1.0);
+  d = sqrt(d);
+  return vec2(-b - d, -b + d);
+}
+
+// Atmosphere scattering (simplified Rayleigh)
+vec3 atmosphereColor(vec3 ro, vec3 rd, float tNear, float tFar, vec3 sunDir) {
+  vec3 scatter = vec3(0.3, 0.5, 1.0); // Rayleigh coefficients
+  if (terrain == 1) scatter = vec3(0.8, 0.4, 0.2); // Mars: thin red
+  else if (terrain == 3) scatter = vec3(0.6, 0.3, 0.15); // Volcanic: hazy
+  else if (terrain == 4) scatter = vec3(0.2, 0.8, 0.5); // Alien: green
+
+  vec3 col = vec3(0.0);
+  float stepSize = (tFar - tNear) / 8.0;
+  float t = tNear;
+  float totalDensity = 0.0;
+
+  for (int i = 0; i < 8; i++) {
+    vec3 pos = ro + rd * (t + stepSize * 0.5);
+    float alt = length(pos) - PLANET_R;
+    float density = exp(-alt / 0.08) * stepSize;
+    totalDensity += density;
+
+    // Sun visibility from this point
+    float sunDot = dot(normalize(pos), sunDir);
+    float sunVis = smoothstep(-0.1, 0.3, sunDot);
+
+    col += scatter * density * sunVis * 1.5;
+    t += stepSize;
+  }
+
+  float alpha = 1.0 - exp(-totalDensity * 4.0);
+  return col * alpha;
+}
+
+// Cloud layer
+float cloudDensity(vec3 p) {
+  float n = fbm(p * 4.0 + vec3(time * 0.02, 0, time * 0.01), 5);
+  return smoothstep(0.4, 0.7, n);
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - res * 0.5) / min(res.x, res.y);
+
+  // Camera ray
+  vec3 rd = normalize(camRot * vec3(uv, -1.5));
+  vec3 ro = camPos;
+
+  vec3 col = vec3(0.0);
+
+  // Stars background
+  vec3 starField = rd * 200.0;
+  float stars = smoothstep(0.97, 1.0, hash(floor(starField)));
+  col = vec3(stars * 0.8);
+
+  // Atmosphere outer shell
+  vec2 tAtmo = raySphere(ro, rd, ATMO_R);
+
+  // Planet surface
+  vec2 tPlanet = raySphere(ro, rd, PLANET_R);
+
+  if (tPlanet.x > 0.0) {
+    // Hit the sphere — now refine with terrain displacement
+    vec3 hitPos = ro + rd * tPlanet.x;
+    vec3 n = normalize(hitPos);
+
+    // Terrain displacement via iterative refinement
+    float t = tPlanet.x - 0.15;
+    float tEnd = tPlanet.x + 0.15;
+    float dt = 0.003;
+    bool hit = false;
+    vec3 surfPos;
+
+    for (int i = 0; i < 100; i++) {
+      vec3 p = ro + rd * t;
+      float r = length(p);
+      float h = terrainHeight(normalize(p));
+      float surfaceR = PLANET_R + h;
+
+      if (r < surfaceR) {
+        // Binary search refinement
+        float tLo = t - dt;
+        float tHi = t;
+        for (int j = 0; j < 8; j++) {
+          float tMid = (tLo + tHi) * 0.5;
+          vec3 pm = ro + rd * tMid;
+          float rm = length(pm);
+          float hm = terrainHeight(normalize(pm));
+          if (rm < PLANET_R + hm) tHi = tMid;
+          else tLo = tMid;
+        }
+        surfPos = ro + rd * tHi;
+        hit = true;
+        break;
+      }
+
+      if (t > tEnd) break;
+      t += dt;
+    }
+
+    if (!hit) {
+      surfPos = hitPos;
+    }
+
+    vec3 sp = normalize(surfPos);
+    float h = terrainHeight(sp);
+
+    // Normal via central differences
+    float eps = 0.001;
+    vec3 t1 = normalize(cross(sp, sp.x > 0.9 ? vec3(0,1,0) : vec3(1,0,0)));
+    vec3 t2 = cross(sp, t1);
+    float hx1 = terrainHeight(normalize(sp + t1 * eps));
+    float hx2 = terrainHeight(normalize(sp - t1 * eps));
+    float hy1 = terrainHeight(normalize(sp + t2 * eps));
+    float hy2 = terrainHeight(normalize(sp - t2 * eps));
+    vec3 norm = normalize(sp + t1 * (hx2 - hx1) / (2.0 * eps) + t2 * (hy2 - hy1) / (2.0 * eps));
+    norm = normalize(norm);
+
+    // Ocean
+    bool isOcean = false;
+    if (ocean && h < 0.005 && (terrain == 0 || terrain == 4)) {
+      isOcean = true;
+      norm = sp; // flat ocean normal
+      // Gentle waves
+      float wave = sin(sp.x * 80.0 + time * 0.5) * cos(sp.z * 60.0 + time * 0.3) * 0.001;
+      norm = normalize(sp + t1 * wave * 10.0 + t2 * wave * 8.0);
+    }
+
+    // Lighting
+    float diff = max(0.0, dot(norm, starDir));
+    float spec = pow(max(0.0, dot(reflect(-starDir, norm), normalize(camPos - surfPos))), isOcean ? 80.0 : 20.0);
+    float amb = 0.05;
+
+    vec3 surfCol;
+    if (isOcean) {
+      vec3 deepWater = terrain == 4 ? vec3(0.05, 0.2, 0.15) : vec3(0.02, 0.08, 0.2);
+      vec3 shallowWater = terrain == 4 ? vec3(0.1, 0.4, 0.3) : vec3(0.05, 0.2, 0.4);
+      float depth = (0.005 - h) * 50.0;
+      surfCol = mix(shallowWater, deepWater, clamp(depth, 0.0, 1.0));
+      surfCol = surfCol * (diff + amb) + vec3(1.0) * spec * 0.5;
+    } else {
+      surfCol = terrainColor(sp, h, norm);
+      surfCol = surfCol * (diff + amb) + vec3(0.9, 0.85, 0.7) * spec * 0.1;
+    }
+
+    // Volcanic glow on night side
+    if (terrain == 3) {
+      float nightSide = max(0.0, -dot(sp, starDir));
+      float heat = max(0.0, 0.5 - length(fract(sp * 1.5) - 0.5)) * 2.0;
+      surfCol += vec3(1.0, 0.2, 0.0) * heat * nightSide * 0.8;
+    }
+
+    // Cloud shadow
+    if (clouds && (terrain == 0 || terrain == 4)) {
+      float cs = cloudDensity(sp * CLOUD_R / PLANET_R);
+      surfCol *= 1.0 - cs * 0.3;
+    }
+
+    col = surfCol;
+
+    // Cloud layer
+    if (clouds) {
+      vec2 tCloud = raySphere(ro, rd, CLOUD_R);
+      if (tCloud.x > 0.0 && tCloud.x < tPlanet.x + 0.2) {
+        vec3 cloudPos = ro + rd * tCloud.x;
+        vec3 cn = normalize(cloudPos);
+        float cd = cloudDensity(cn);
+        float cloudLight = max(0.0, dot(cn, starDir)) * 0.8 + 0.2;
+        vec3 cloudCol = vec3(cloudLight);
+        if (terrain == 3) cloudCol *= vec3(0.9, 0.7, 0.5); // volcanic haze
+        col = mix(col, cloudCol, cd * 0.7);
+      }
+    }
+
+    // Atmosphere on surface (subtle rim)
+    if (atmosphere) {
+      float fresnel = pow(1.0 - max(0.0, dot(norm, normalize(camPos - surfPos))), 3.0);
+      vec3 atmoColor = terrain == 1 ? vec3(0.8, 0.4, 0.2) :
+                       terrain == 3 ? vec3(0.6, 0.3, 0.1) :
+                       terrain == 4 ? vec3(0.2, 0.7, 0.4) :
+                       vec3(0.3, 0.5, 1.0);
+      float sunDot = max(0.0, dot(sp, starDir));
+      col += atmoColor * fresnel * 0.4 * (sunDot * 0.5 + 0.5);
+    }
+
+  } else if (tAtmo.x > 0.0 && atmosphere) {
+    // Ray misses planet but hits atmosphere
+    float thickness = tAtmo.y - tAtmo.x;
+    vec3 midPoint = ro + rd * (tAtmo.x + thickness * 0.5);
+    float alt = length(midPoint) - PLANET_R;
+    float density = exp(-alt / 0.06) * thickness * 0.5;
+
+    vec3 scatter = terrain == 1 ? vec3(0.8, 0.4, 0.2) :
+                   terrain == 3 ? vec3(0.6, 0.3, 0.15) :
+                   terrain == 4 ? vec3(0.2, 0.8, 0.5) :
+                   vec3(0.3, 0.5, 1.0);
+
+    float sunDot = dot(normalize(midPoint), starDir);
+    float sunVis = smoothstep(-0.1, 0.3, sunDot);
+    // Sunset coloring
+    float sunsetFactor = smoothstep(-0.15, 0.0, sunDot) * (1.0 - smoothstep(0.0, 0.3, sunDot));
+    vec3 sunsetColor = vec3(1.0, 0.4, 0.15);
+
+    vec3 atmoCol = mix(scatter, sunsetColor, sunsetFactor * 0.6) * sunVis * 2.0;
+    float alpha = 1.0 - exp(-density * 3.0);
+    col = mix(col, atmoCol, alpha);
+  }
+
+  // Gamma
+  col = pow(col, vec3(1.0 / 2.2));
+  // Vignette
+  vec2 vig = gl_FragCoord.xy / res - 0.5;
+  col *= 1.0 - dot(vig, vig) * 0.3;
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+// Build program
+const prog = link(VS, FS);
+
+// Quad buffer
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+const aLoc = gl.getAttribLocation(prog.program, 'a');
+gl.enableVertexAttribArray(aLoc);
+gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio, 1.5); // limit for perf
+  canvas.width = Math.round(window.innerWidth * dpr);
+  canvas.height = Math.round(window.innerHeight * dpr);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Controls
+document.getElementById('btnTerrain').addEventListener('click', () => {
+  terrainType = (terrainType + 1) % 5;
+  document.getElementById('btnTerrain').textContent = 'Terrain: ' + terrainNames[terrainType];
+});
+document.getElementById('btnAtmo').addEventListener('click', () => {
+  showAtmo = !showAtmo;
+  document.getElementById('btnAtmo').textContent = 'Atmosphere: ' + (showAtmo ? 'ON' : 'OFF');
+});
+document.getElementById('btnClouds').addEventListener('click', () => {
+  showClouds = !showClouds;
+  document.getElementById('btnClouds').textContent = 'Clouds: ' + (showClouds ? 'ON' : 'OFF');
+});
+document.getElementById('btnOcean').addEventListener('click', () => {
+  showOcean = !showOcean;
+  document.getElementById('btnOcean').textContent = 'Ocean: ' + (showOcean ? 'ON' : 'OFF');
+});
+document.getElementById('btnRotate').addEventListener('click', () => {
+  autoRotate = !autoRotate;
+  document.getElementById('btnRotate').textContent = 'Auto-rotate: ' + (autoRotate ? 'ON' : 'OFF');
+});
+document.getElementById('btnStar').addEventListener('click', () => {
+  starMode = (starMode + 1) % 4;
+  document.getElementById('btnStar').textContent = 'Star light: ' + starNames[starMode];
+});
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 't') document.getElementById('btnTerrain').click();
+  if (e.key === 'a') document.getElementById('btnAtmo').click();
+  if (e.key === 'c') document.getElementById('btnClouds').click();
+  if (e.key === 'o') document.getElementById('btnOcean').click();
+  if (e.key === 'r') document.getElementById('btnRotate').click();
+  if (e.key === 'l') document.getElementById('btnStar').click();
+  if (e.key === ' ') { e.preventDefault(); terrainType = (terrainType + 1) % 5; document.getElementById('btnTerrain').textContent = 'Terrain: ' + terrainNames[terrainType]; }
+});
+
+let fc = 0, ft = performance.now();
+
+function loop(t) {
+  if (document.hidden) { requestAnimationFrame(loop); return; }
+
+  if (autoRotate && !dragging) camPhi += 0.003;
+
+  // Star direction based on mode
+  const starAngles = [0.8, 0.1, -0.8, -0.1];
+  const targetAngle = starAngles[starMode];
+  starAngle += (targetAngle - starAngle) * 0.02;
+
+  // Camera
+  const cx = camDist * Math.sin(camTheta) * Math.cos(camPhi);
+  const cy = camDist * Math.cos(camTheta);
+  const cz = camDist * Math.sin(camTheta) * Math.sin(camPhi);
+  const camPos = [cx, cy, cz];
+
+  // Camera rotation matrix (look at origin)
+  const fwd = [-cx, -cy, -cz];
+  const len = Math.sqrt(fwd[0]*fwd[0] + fwd[1]*fwd[1] + fwd[2]*fwd[2]);
+  fwd[0] /= len; fwd[1] /= len; fwd[2] /= len;
+
+  const up = [0, 1, 0];
+  const right = [
+    fwd[1]*up[2] - fwd[2]*up[1],
+    fwd[2]*up[0] - fwd[0]*up[2],
+    fwd[0]*up[1] - fwd[1]*up[0]
+  ];
+  const rLen = Math.sqrt(right[0]*right[0] + right[1]*right[1] + right[2]*right[2]);
+  right[0] /= rLen; right[1] /= rLen; right[2] /= rLen;
+
+  const newUp = [
+    right[1]*fwd[2] - right[2]*fwd[1],
+    right[2]*fwd[0] - right[0]*fwd[2],
+    right[0]*fwd[1] - right[1]*fwd[0]
+  ];
+
+  const camRot = new Float32Array([
+    right[0], newUp[0], fwd[0],
+    right[1], newUp[1], fwd[1],
+    right[2], newUp[2], fwd[2]
+  ]);
+
+  // Star direction
+  const sa = starAngle;
+  const starDir = [Math.cos(sa), Math.sin(sa), 0.3];
+  const sdLen = Math.sqrt(starDir[0]*starDir[0] + starDir[1]*starDir[1] + starDir[2]*starDir[2]);
+  starDir[0] /= sdLen; starDir[1] /= sdLen; starDir[2] /= sdLen;
+
+  // Render
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(prog.program);
+  gl.uniform2f(prog.u.res, canvas.width, canvas.height);
+  gl.uniform1f(prog.u.time, t * 0.001);
+  gl.uniform3f(prog.u.camPos, camPos[0], camPos[1], camPos[2]);
+  gl.uniformMatrix3fv(prog.u.camRot, false, camRot);
+  gl.uniform3f(prog.u.starDir, starDir[0], starDir[1], starDir[2]);
+  gl.uniform1i(prog.u.terrain, terrainType);
+  gl.uniform1i(prog.u.atmosphere, showAtmo ? 1 : 0);
+  gl.uniform1i(prog.u.clouds, showClouds ? 1 : 0);
+  gl.uniform1i(prog.u.ocean, showOcean ? 1 : 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  fc++;
+  if (t - ft > 1000) {
+    document.getElementById('fps').textContent = fc;
+    fc = 0; ft = t;
+  }
+
+  requestAnimationFrame(loop);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) requestAnimationFrame(loop);
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

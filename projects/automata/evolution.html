@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evolution — Natural Selection Simulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; color: #c8ccd0; font-family: 'Courier New', monospace; overflow: hidden; }
+canvas { display: block; position: fixed; top: 0; left: 0; }
+
+#ui {
+  position: fixed; top: 0; right: 0; width: 290px; height: 100vh;
+  background: rgba(12,12,20,0.92); backdrop-filter: blur(6px);
+  border-left: 1px solid #2a2a3a; padding: 12px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px; z-index: 10;
+  transition: transform 0.3s;
+}
+#ui.collapsed { transform: translateX(290px); }
+
+#toggle-ui {
+  position: fixed; top: 8px; right: 8px; z-index: 20;
+  background: rgba(0,0,0,0.5); border: 1px solid #2a2a3a; color: #7fdbca;
+  padding: 4px 8px; cursor: pointer; font: 11px monospace; border-radius: 4px;
+}
+
+h1 { font-size: 15px; color: #7fdbca; letter-spacing: 2px; text-transform: uppercase; }
+h2 { font-size: 11px; color: #c792ea; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+
+.stats { font-size: 11px; line-height: 1.7; color: #888; }
+.stats span { color: #7fdbca; }
+.stats .warn { color: #f0c674; }
+
+.btn {
+  background: #1a1a2e; border: 1px solid #2a2a4a; color: #c8ccd0;
+  padding: 6px 10px; cursor: pointer; font: 11px monospace;
+  transition: all 0.2s; text-align: center;
+}
+.btn:hover { background: #2a2a4e; border-color: #7fdbca; }
+.btn.active { background: #2a2a4e; border-color: #7fdbca; color: #7fdbca; }
+.btn-row { display: flex; gap: 4px; }
+.btn-row .btn { flex: 1; }
+
+.graph-box {
+  background: #12121a; border: 1px solid #2a2a3a; border-radius: 4px;
+  height: 80px; position: relative; overflow: hidden;
+}
+.graph-label {
+  position: absolute; top: 2px; left: 4px; font-size: 9px; color: #555;
+}
+
+select {
+  background: #1a1a2e; border: 1px solid #2a2a4a; color: #c8ccd0;
+  padding: 5px; font: 11px monospace; width: 100%;
+}
+
+.slider-row { display: flex; align-items: center; gap: 6px; }
+.slider-row label { font-size: 10px; color: #888; min-width: 70px; }
+.slider-row input { flex: 1; }
+.slider-row .val { font-size: 10px; color: #7fdbca; min-width: 30px; text-align: right; }
+
+.selected-info {
+  background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 4px;
+  padding: 8px; font-size: 10px; line-height: 1.6; color: #888;
+  display: none;
+}
+.selected-info.show { display: block; }
+.selected-info span { color: #c792ea; }
+
+.species-list {
+  font-size: 10px; line-height: 1.6; color: #888; max-height: 80px; overflow-y: auto;
+}
+.species-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }
+
+a.back { color: #555; text-decoration: none; font-size: 11px; }
+a.back:hover { color: #7fdbca; }
+
+.tab-row { display: flex; gap: 2px; margin-bottom: 4px; }
+.tab { background: #12121a; border: 1px solid #2a2a3a; color: #666; padding: 3px 8px;
+  cursor: pointer; font: 10px monospace; flex: 1; text-align: center; }
+.tab.active { color: #7fdbca; border-color: #7fdbca; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<button id="toggle-ui" onclick="toggleUI()">Panel</button>
+
+<div id="ui">
+  <div>
+    <h1>&#x1F9EC; Evolution</h1>
+    <a class="back" href="/">&larr; Automata Hub</a>
+  </div>
+
+  <div>
+    <h2>World</h2>
+    <div class="stats" id="world-stats">
+      Gen: <span id="s-gen">0</span> &middot; Pop: <span id="s-pop">0</span> / <span id="s-cap">0</span><br>
+      Food: <span id="s-food">0</span> &middot; Species: <span id="s-species">0</span><br>
+      Births: <span id="s-births">0</span> &middot; Deaths: <span id="s-deaths">0</span><br>
+      Oldest: <span id="s-oldest">0</span>s &middot; Avg fitness: <span id="s-fitness">0</span><br>
+      Time: <span id="s-time">0</span>s &middot; Speed: <span id="s-speed">1</span>x
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn" onclick="resetWorld()">New World</button>
+    <button class="btn" onclick="togglePause()" id="btn-pause">Pause</button>
+    <button class="btn" onclick="cycleSpeed()">Speed</button>
+  </div>
+
+  <div>
+    <h2>Scenarios</h2>
+    <select id="scenario" onchange="loadScenario(this.value)">
+      <option value="default">Default — Balanced</option>
+      <option value="sexual">Sexual — Crossover enabled</option>
+      <option value="scarce">Scarce — Low food, high pressure</option>
+      <option value="abundant">Abundant — Easy life, drift</option>
+      <option value="predators">Predators — Two trophic levels</option>
+      <option value="islands">Islands — Isolated populations</option>
+      <option value="radiation">Radiation Zone — High mutation</option>
+      <option value="niches">Niches — Food zones, speciation</option>
+      <option value="arms-race">Arms Race — Predator vs prey coevolution</option>
+    </select>
+  </div>
+
+  <div>
+    <h2>Parameters</h2>
+    <div class="slider-row">
+      <label>Mutation</label>
+      <input type="range" min="0.01" max="0.5" step="0.01" value="0.1" id="sl-mutation"
+        oninput="cfg.mutationRate=+this.value;document.getElementById('v-mutation').textContent=this.value">
+      <span class="val" id="v-mutation">0.1</span>
+    </div>
+    <div class="slider-row">
+      <label>Food rate</label>
+      <input type="range" min="0.1" max="5" step="0.1" value="1" id="sl-food"
+        oninput="cfg.foodRate=+this.value;document.getElementById('v-food').textContent=this.value">
+      <span class="val" id="v-food">1</span>
+    </div>
+    <div class="slider-row">
+      <label>Food value</label>
+      <input type="range" min="10" max="200" step="5" value="60" id="sl-fval"
+        oninput="cfg.foodValue=+this.value;document.getElementById('v-fval').textContent=this.value">
+      <span class="val" id="v-fval">60</span>
+    </div>
+    <div class="slider-row">
+      <label>Sexual repro</label>
+      <input type="range" min="0" max="1" step="0.1" value="0" id="sl-sexual"
+        oninput="cfg.sexualRate=+this.value;document.getElementById('v-sexual').textContent=this.value">
+      <span class="val" id="v-sexual">0</span>
+    </div>
+  </div>
+
+  <div>
+    <h2>Species</h2>
+    <div class="species-list" id="species-list">No species yet</div>
+  </div>
+
+  <div>
+    <div class="tab-row">
+      <div class="tab active" onclick="graphTab='pop';updateTabs()">Population</div>
+      <div class="tab" onclick="graphTab='traits';updateTabs()">Traits</div>
+      <div class="tab" onclick="graphTab='species';updateTabs()">Species</div>
+    </div>
+    <div class="graph-box" id="main-graph">
+      <span class="graph-label" id="graph-label">Population over time</span>
+      <canvas id="graph-canvas" width="264" height="80"></canvas>
+    </div>
+  </div>
+
+  <div class="selected-info" id="selected-info">
+    <h2>Selected Creature</h2>
+    <div id="creature-detail"></div>
+  </div>
+
+  <div style="margin-top:auto">
+    <div style="font-size:9px;color:#444;line-height:1.5">
+      Click creature to inspect &middot; Space: pause<br>
+      1-4: speed &middot; N: new world &middot; H: toggle panel<br>
+      Creatures evolve neural nets through mutation and<br>
+      natural selection. Sexual mode enables gene crossover.<br>
+      Watch for speciation — color clusters = emerging species.
+    </div>
+  </div>
+</div>
+
+<script>
+// === Configuration ===
+const cfg = {
+  initialPop: 40,
+  maxPop: 200,
+  foodRate: 1.0,
+  foodValue: 60,
+  foodMax: 150,
+  mutationRate: 0.1,
+  mutationStrength: 0.3,
+  energyDrain: 0.15,
+  reproThreshold: 150,
+  reproCost: 80,
+  maxAge: 1800,
+  worldW: 0,
+  worldH: 0,
+  predators: false,
+  islands: false,
+  speedMul: 1,
+  sexualRate: 0,       // 0 = all asexual, 1 = all sexual
+  foodZones: [],       // {x, y, r, type} — for niches scenario
+  niches: false,
+};
+
+// === State ===
+let creatures = [];
+let food = [];
+let obstacles = [];
+let generation = 0;
+let totalBirths = 0;
+let totalDeaths = 0;
+let simTime = 0;
+let paused = false;
+let selectedCreature = null;
+let popHistory = [];
+let traitHistory = [];
+let speciesHistory = [];
+let species = [];     // {id, centroid, color, count}
+let nextSpeciesId = 0;
+let animId = null;
+let graphTab = 'pop';
+let aliveCount = 0;   // cached for perf
+
+// === Canvas ===
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const graphCtx = document.getElementById('graph-canvas').getContext('2d');
+
+function resize() {
+  const uiW = document.getElementById('ui').classList.contains('collapsed') ? 0 : 290;
+  canvas.width = window.innerWidth - uiW;
+  canvas.height = window.innerHeight;
+  cfg.worldW = canvas.width;
+  cfg.worldH = canvas.height;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// === Neural Network (simple 3-layer) ===
+// Inputs: 10 (nearest food dx/dy/dist, nearest creature dx/dy/dist/isKin, own energy, own speed, food type match)
+// Hidden: 8
+// Outputs: 5 (turn left, turn right, accelerate, reproduce, mate-seek)
+const NN_IN = 10, NN_HID = 8, NN_OUT = 5;
+
+function createBrain() {
+  const w1 = new Float32Array(NN_IN * NN_HID);
+  const w2 = new Float32Array(NN_HID * NN_OUT);
+  const b1 = new Float32Array(NN_HID);
+  const b2 = new Float32Array(NN_OUT);
+  for (let i = 0; i < w1.length; i++) w1[i] = (Math.random() - 0.5) * 2 / Math.sqrt(NN_IN);
+  for (let i = 0; i < w2.length; i++) w2[i] = (Math.random() - 0.5) * 2 / Math.sqrt(NN_HID);
+  for (let i = 0; i < b1.length; i++) b1[i] = (Math.random() - 0.5) * 0.5;
+  for (let i = 0; i < b2.length; i++) b2[i] = (Math.random() - 0.5) * 0.5;
+  return { w1, w2, b1, b2 };
+}
+
+function cloneBrain(brain) {
+  return {
+    w1: new Float32Array(brain.w1),
+    w2: new Float32Array(brain.w2),
+    b1: new Float32Array(brain.b1),
+    b2: new Float32Array(brain.b2),
+  };
+}
+
+function mutateBrain(brain) {
+  const mutate = (arr) => {
+    for (let i = 0; i < arr.length; i++) {
+      if (Math.random() < cfg.mutationRate) {
+        arr[i] += (Math.random() - 0.5) * 2 * cfg.mutationStrength;
+      }
+    }
+  };
+  mutate(brain.w1); mutate(brain.w2); mutate(brain.b1); mutate(brain.b2);
+}
+
+function crossoverBrain(a, b) {
+  const child = createBrain();
+  const cross = (arr, arrA, arrB) => {
+    // Uniform crossover with per-weight coin flip
+    for (let i = 0; i < arr.length; i++) {
+      arr[i] = Math.random() < 0.5 ? arrA[i] : arrB[i];
+    }
+  };
+  cross(child.w1, a.w1, b.w1);
+  cross(child.w2, a.w2, b.w2);
+  cross(child.b1, a.b1, b.b1);
+  cross(child.b2, a.b2, b.b2);
+  return child;
+}
+
+function think(brain, inputs) {
+  const hidden = new Float32Array(NN_HID);
+  for (let h = 0; h < NN_HID; h++) {
+    let sum = brain.b1[h];
+    for (let i = 0; i < NN_IN; i++) sum += inputs[i] * brain.w1[i * NN_HID + h];
+    hidden[h] = Math.tanh(sum);
+  }
+  const out = new Float32Array(NN_OUT);
+  for (let o = 0; o < NN_OUT; o++) {
+    let sum = brain.b2[o];
+    for (let h = 0; h < NN_HID; h++) sum += hidden[h] * brain.w2[h * NN_OUT + o];
+    out[o] = 1 / (1 + Math.exp(-sum));
+  }
+  return out;
+}
+
+// === Genes ===
+function createGenes() {
+  return {
+    speed: 1.0 + (Math.random() - 0.5) * 0.8,
+    size: 4 + Math.random() * 6,
+    senseRange: 80 + Math.random() * 120,
+    efficiency: 0.7 + Math.random() * 0.6,
+    hue: Math.random() * 360,
+    aggressiveness: Math.random() * 0.5,
+    reproAge: 200 + Math.random() * 400,
+    dietPref: Math.random(),  // 0=green food, 1=red food (for niches)
+  };
+}
+
+function mutateGenes(genes) {
+  const g = { ...genes };
+  if (Math.random() < cfg.mutationRate) g.speed = Math.max(0.3, g.speed + (Math.random() - 0.5) * 0.3);
+  if (Math.random() < cfg.mutationRate) g.size = Math.max(2, Math.min(15, g.size + (Math.random() - 0.5) * 2));
+  if (Math.random() < cfg.mutationRate) g.senseRange = Math.max(30, g.senseRange + (Math.random() - 0.5) * 40);
+  if (Math.random() < cfg.mutationRate) g.efficiency = Math.max(0.3, Math.min(1.8, g.efficiency + (Math.random() - 0.5) * 0.2));
+  if (Math.random() < cfg.mutationRate) g.hue = (g.hue + (Math.random() - 0.5) * 30 + 360) % 360;
+  if (Math.random() < cfg.mutationRate) g.aggressiveness = Math.max(0, Math.min(1, g.aggressiveness + (Math.random() - 0.5) * 0.2));
+  if (Math.random() < cfg.mutationRate) g.reproAge = Math.max(100, g.reproAge + (Math.random() - 0.5) * 100);
+  if (Math.random() < cfg.mutationRate) g.dietPref = Math.max(0, Math.min(1, g.dietPref + (Math.random() - 0.5) * 0.2));
+  return g;
+}
+
+function crossoverGenes(a, b) {
+  const g = {};
+  for (const key of Object.keys(a)) {
+    // Blend with noise for continuous traits
+    if (key === 'hue') {
+      // Circular interpolation for hue
+      const diff = ((b.hue - a.hue + 540) % 360) - 180;
+      g.hue = (a.hue + diff * Math.random() + 360) % 360;
+    } else {
+      const t = 0.3 + Math.random() * 0.4; // biased toward middle
+      g[key] = a[key] * t + b[key] * (1 - t);
+    }
+  }
+  return g;
+}
+
+// Genetic distance between two creatures (normalized 0-1)
+function geneticDistance(a, b) {
+  const ga = a.genes, gb = b.genes;
+  let d = 0;
+  d += Math.abs(ga.speed - gb.speed) / 2;
+  d += Math.abs(ga.size - gb.size) / 13;
+  d += Math.abs(ga.senseRange - gb.senseRange) / 200;
+  d += Math.abs(ga.efficiency - gb.efficiency) / 1.5;
+  d += Math.abs(ga.aggressiveness - gb.aggressiveness);
+  d += Math.abs(ga.dietPref - gb.dietPref);
+  // Hue distance (circular)
+  const hueDiff = Math.abs(((ga.hue - gb.hue + 540) % 360) - 180) / 180;
+  d += hueDiff;
+  return d / 7; // normalize by number of traits
+}
+
+// === Creature ===
+function createCreature(x, y, brain, genes, gen) {
+  return {
+    x: x ?? Math.random() * cfg.worldW,
+    y: y ?? Math.random() * cfg.worldH,
+    angle: Math.random() * Math.PI * 2,
+    vx: 0, vy: 0,
+    energy: 100,
+    age: 0,
+    generation: gen || 0,
+    brain: brain || createBrain(),
+    genes: genes || createGenes(),
+    foodEaten: 0,
+    children: 0,
+    alive: true,
+    isPredator: false,
+    flash: 0,
+    speciesId: -1,
+    mateCooldown: 0,
+  };
+}
+
+// === Food ===
+function spawnFood() {
+  if (food.length >= cfg.foodMax) return;
+  let x, y, type = 0;
+  if (cfg.islands) {
+    const island = obstacles[Math.floor(Math.random() * Math.max(1, obstacles.length))];
+    if (island) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * island.r * 0.8;
+      x = island.x + Math.cos(angle) * r;
+      y = island.y + Math.sin(angle) * r;
+    } else {
+      x = Math.random() * cfg.worldW;
+      y = Math.random() * cfg.worldH;
+    }
+  } else if (cfg.niches && cfg.foodZones.length > 0) {
+    // Spawn in food zones with type
+    const zone = cfg.foodZones[Math.floor(Math.random() * cfg.foodZones.length)];
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * zone.r;
+    x = zone.x + Math.cos(angle) * r;
+    y = zone.y + Math.sin(angle) * r;
+    type = zone.type;
+  } else {
+    x = Math.random() * cfg.worldW;
+    y = Math.random() * cfg.worldH;
+  }
+  food.push({
+    x, y, type,
+    value: cfg.foodValue * (0.5 + Math.random() * 1.0),
+    pulse: Math.random() * Math.PI * 2,
+  });
+}
+
+// === Spatial lookup ===
+const GRID_SIZE = 64;
+let foodGrid = {};
+let creatureGrid = {};
+
+function gridKey(x, y) {
+  return ((x / GRID_SIZE) | 0) + ',' + ((y / GRID_SIZE) | 0);
+}
+
+function buildGrids() {
+  foodGrid = {};
+  creatureGrid = {};
+  for (let i = 0; i < food.length; i++) {
+    const k = gridKey(food[i].x, food[i].y);
+    (foodGrid[k] || (foodGrid[k] = [])).push(i);
+  }
+  for (let i = 0; i < creatures.length; i++) {
+    if (!creatures[i].alive) continue;
+    const k = gridKey(creatures[i].x, creatures[i].y);
+    (creatureGrid[k] || (creatureGrid[k] = [])).push(i);
+  }
+}
+
+function nearbyFood(x, y, range) {
+  let best = null, bestDist = range * range;
+  const gx = (x / GRID_SIZE) | 0, gy = (y / GRID_SIZE) | 0;
+  const r = Math.ceil(range / GRID_SIZE);
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      const k = (gx + dx) + ',' + (gy + dy);
+      const list = foodGrid[k];
+      if (!list) continue;
+      for (const idx of list) {
+        const f = food[idx];
+        if (!f || f.eaten) continue;
+        const d2 = (f.x - x) ** 2 + (f.y - y) ** 2;
+        if (d2 < bestDist) { bestDist = d2; best = f; }
+      }
+    }
+  }
+  return best;
+}
+
+function nearbyCreature(x, y, range, self) {
+  let best = null, bestDist = range * range;
+  const gx = (x / GRID_SIZE) | 0, gy = (y / GRID_SIZE) | 0;
+  const r = Math.ceil(range / GRID_SIZE);
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      const k = (gx + dx) + ',' + (gy + dy);
+      const list = creatureGrid[k];
+      if (!list) continue;
+      for (const idx of list) {
+        const c = creatures[idx];
+        if (c === self || !c.alive) continue;
+        const d2 = (c.x - x) ** 2 + (c.y - y) ** 2;
+        if (d2 < bestDist) { bestDist = d2; best = c; }
+      }
+    }
+  }
+  return best;
+}
+
+// Find nearby mate (genetically compatible)
+function nearbyMate(x, y, range, self) {
+  let best = null, bestDist = range * range;
+  const gx = (x / GRID_SIZE) | 0, gy = (y / GRID_SIZE) | 0;
+  const r = Math.ceil(range / GRID_SIZE);
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      const k = (gx + dx) + ',' + (gy + dy);
+      const list = creatureGrid[k];
+      if (!list) continue;
+      for (const idx of list) {
+        const c = creatures[idx];
+        if (c === self || !c.alive) continue;
+        if (c.energy < cfg.reproThreshold * 0.5) continue; // needs energy
+        if (c.mateCooldown > 0) continue;
+        const d2 = (c.x - x) ** 2 + (c.y - y) ** 2;
+        if (d2 < bestDist) {
+          // Check genetic compatibility — too different = different species, can't mate
+          const dist = geneticDistance(self, c);
+          if (dist < 0.4) { // compatibility threshold
+            bestDist = d2;
+            best = c;
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// === Species tracking (k-means-like clustering every few seconds) ===
+const SPECIES_COLORS = [
+  '#7fdbca', '#ff7eb6', '#82aaff', '#f0c674', '#c792ea',
+  '#e06060', '#60e0a0', '#e0a060', '#a060e0', '#60a0e0',
+  '#e0e060', '#60e0e0', '#e060a0', '#a0e060', '#6060e0',
+];
+
+function updateSpecies() {
+  const alive = creatures.filter(c => c.alive);
+  if (alive.length < 3) { species = []; return; }
+
+  // Feature vector for clustering
+  const features = alive.map(c => [
+    c.genes.speed / 2,
+    c.genes.size / 15,
+    c.genes.senseRange / 200,
+    c.genes.efficiency / 1.8,
+    c.genes.aggressiveness,
+    c.genes.dietPref,
+  ]);
+
+  // Simple DBSCAN-like: find clusters by genetic distance
+  const assigned = new Int32Array(alive.length).fill(-1);
+  let clusterId = 0;
+  const eps = 0.15; // distance threshold
+
+  for (let i = 0; i < alive.length; i++) {
+    if (assigned[i] !== -1) continue;
+    // Find all creatures within eps
+    const cluster = [i];
+    assigned[i] = clusterId;
+
+    for (let j = 0; j < cluster.length; j++) {
+      const ci = cluster[j];
+      for (let k = 0; k < alive.length; k++) {
+        if (assigned[k] !== -1) continue;
+        let dist = 0;
+        for (let f = 0; f < features[ci].length; f++) {
+          dist += (features[ci][f] - features[k][f]) ** 2;
+        }
+        dist = Math.sqrt(dist);
+        if (dist < eps) {
+          assigned[k] = clusterId;
+          cluster.push(k);
+        }
+      }
+    }
+    if (cluster.length >= 3) {
+      clusterId++;
+    } else {
+      // Too small, mark as noise
+      for (const idx of cluster) assigned[idx] = -1;
+    }
+  }
+
+  // Build species list
+  const newSpecies = [];
+  for (let s = 0; s < clusterId; s++) {
+    const members = [];
+    for (let i = 0; i < alive.length; i++) {
+      if (assigned[i] === s) members.push(alive[i]);
+    }
+    if (members.length === 0) continue;
+
+    // Average traits as centroid
+    let avgSpeed = 0, avgSize = 0, avgSense = 0, avgEff = 0, avgAggr = 0, avgDiet = 0, avgHue = 0;
+    let hueX = 0, hueY = 0;
+    for (const m of members) {
+      avgSpeed += m.genes.speed;
+      avgSize += m.genes.size;
+      avgSense += m.genes.senseRange;
+      avgEff += m.genes.efficiency;
+      avgAggr += m.genes.aggressiveness;
+      avgDiet += m.genes.dietPref;
+      hueX += Math.cos(m.genes.hue * Math.PI / 180);
+      hueY += Math.sin(m.genes.hue * Math.PI / 180);
+    }
+    const n = members.length;
+    avgHue = (Math.atan2(hueY / n, hueX / n) * 180 / Math.PI + 360) % 360;
+
+    // Try to match to existing species by centroid similarity
+    let matchedId = -1;
+    for (const old of species) {
+      const cd = Math.abs(old.avgSpeed - avgSpeed / n) + Math.abs(old.avgSize - avgSize / n) / 5;
+      if (cd < 0.3) { matchedId = old.id; break; }
+    }
+    if (matchedId === -1) matchedId = nextSpeciesId++;
+
+    const sp = {
+      id: matchedId,
+      count: n,
+      color: SPECIES_COLORS[matchedId % SPECIES_COLORS.length],
+      avgSpeed: avgSpeed / n,
+      avgSize: avgSize / n,
+      avgSense: avgSense / n,
+      avgEff: avgEff / n,
+      avgAggr: avgAggr / n,
+      avgDiet: avgDiet / n,
+      avgHue,
+    };
+    newSpecies.push(sp);
+
+    // Assign species ID to creatures
+    for (const m of members) m.speciesId = matchedId;
+  }
+
+  // Unassigned = loners
+  for (let i = 0; i < alive.length; i++) {
+    if (assigned[i] === -1) alive[i].speciesId = -1;
+  }
+
+  species = newSpecies;
+}
+
+// === Simulation step ===
+function step() {
+  simTime++;
+  buildGrids();
+
+  // Spawn food
+  const foodPerFrame = cfg.foodRate * cfg.speedMul;
+  for (let i = 0; i < foodPerFrame; i++) {
+    if (Math.random() < (foodPerFrame % 1 || 1)) spawnFood();
+  }
+
+  // Count alive first for population cap
+  aliveCount = 0;
+  for (let ci = 0; ci < creatures.length; ci++) {
+    if (creatures[ci].alive) aliveCount++;
+  }
+
+  // Update creatures
+  for (let ci = 0; ci < creatures.length; ci++) {
+    const c = creatures[ci];
+    if (!c.alive) continue;
+    c.age++;
+    c.flash = Math.max(0, c.flash - 0.05);
+    if (c.mateCooldown > 0) c.mateCooldown--;
+
+    // Energy drain
+    const speedCost = c.genes.speed * 0.05;
+    const sizeCost = c.genes.size * 0.005;
+    const senseCost = c.genes.senseRange * 0.0002;
+    c.energy -= (cfg.energyDrain + speedCost + sizeCost + senseCost) / c.genes.efficiency;
+
+    if (c.energy <= 0 || c.age > cfg.maxAge) {
+      c.alive = false;
+      totalDeaths++;
+      aliveCount--;
+      if (c === selectedCreature) selectedCreature = null;
+      continue;
+    }
+
+    // Sense environment
+    const nf = nearbyFood(c.x, c.y, c.genes.senseRange);
+    const nc = nearbyCreature(c.x, c.y, c.genes.senseRange, c);
+
+    // Build neural net inputs
+    const inputs = new Float32Array(NN_IN);
+    if (nf) {
+      const dx = nf.x - c.x, dy = nf.y - c.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      inputs[0] = dx / c.genes.senseRange;
+      inputs[1] = dy / c.genes.senseRange;
+      inputs[2] = 1 - dist / c.genes.senseRange;
+    }
+    if (nc) {
+      const dx = nc.x - c.x, dy = nc.y - c.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      inputs[3] = dx / c.genes.senseRange;
+      inputs[4] = dy / c.genes.senseRange;
+      inputs[5] = 1 - dist / c.genes.senseRange;
+      // Is it kin? (same species = positive signal)
+      inputs[6] = (nc.speciesId === c.speciesId && c.speciesId >= 0) ? 1 : -1;
+    }
+    inputs[7] = (c.energy - 100) / 100;
+    inputs[8] = c.genes.speed / 2;
+    // Food type match (for niches)
+    if (nf && cfg.niches) {
+      inputs[9] = 1 - Math.abs(nf.type - c.genes.dietPref) * 2;
+    }
+
+    // Think
+    const out = think(c.brain, inputs);
+    const turnLeft = out[0];
+    const turnRight = out[1];
+    const accel = out[2];
+    const wantRepro = out[3];
+    const wantMate = out[4];
+
+    // Apply outputs
+    c.angle += (turnRight - turnLeft) * 0.15;
+    const moveSpeed = c.genes.speed * accel * 2.5;
+    c.vx = Math.cos(c.angle) * moveSpeed;
+    c.vy = Math.sin(c.angle) * moveSpeed;
+    c.x += c.vx;
+    c.y += c.vy;
+
+    // Wrap
+    if (c.x < 0) c.x += cfg.worldW;
+    if (c.x >= cfg.worldW) c.x -= cfg.worldW;
+    if (c.y < 0) c.y += cfg.worldH;
+    if (c.y >= cfg.worldH) c.y -= cfg.worldH;
+
+    // Eat food (use grid for efficiency, mark eaten for deferred removal)
+    const gx = (c.x / GRID_SIZE) | 0, gy = (c.y / GRID_SIZE) | 0;
+    const eatRange = c.genes.size + 4;
+    const eatR2 = eatRange * eatRange;
+    outer: for (let fdx = -1; fdx <= 1; fdx++) {
+      for (let fdy = -1; fdy <= 1; fdy++) {
+        const fk = (gx + fdx) + ',' + (gy + fdy);
+        const flist = foodGrid[fk];
+        if (!flist) continue;
+        for (const fidx of flist) {
+          const f = food[fidx];
+          if (!f || f.eaten) continue;
+          const d2 = (f.x - c.x) ** 2 + (f.y - c.y) ** 2;
+          if (d2 < eatR2) {
+            let nutrition = f.value * c.genes.efficiency;
+            if (cfg.niches) {
+              const match = 1 - Math.abs(f.type - c.genes.dietPref);
+              nutrition *= 0.5 + match * 0.5; // 50-100% based on diet match
+            }
+            c.energy += nutrition;
+            c.foodEaten++;
+            c.flash = 1;
+            f.eaten = true;
+            break outer;
+          }
+        }
+      }
+    }
+
+    // Predator: eat smaller creatures
+    if (cfg.predators && c.genes.aggressiveness > 0.3 && nc) {
+      const d2 = (nc.x - c.x) ** 2 + (nc.y - c.y) ** 2;
+      const attackRange = c.genes.size + nc.genes.size;
+      if (d2 < attackRange * attackRange && c.genes.size > nc.genes.size * 1.2) {
+        c.energy += nc.energy * 0.5;
+        nc.alive = false;
+        nc.energy = 0;
+        totalDeaths++;
+        aliveCount--;
+        c.flash = 1;
+        c.isPredator = true;
+      }
+    }
+
+    // Reproduce
+    const canRepro = wantRepro > 0.6 && c.energy > cfg.reproThreshold && c.age > c.genes.reproAge
+        && aliveCount < cfg.maxPop && c.mateCooldown <= 0;
+
+    if (canRepro) {
+      let childBrain, childGenes;
+
+      // Sexual reproduction?
+      if (cfg.sexualRate > 0 && Math.random() < cfg.sexualRate && wantMate > 0.4) {
+        const mate = nearbyMate(c.x, c.y, c.genes.senseRange * 0.6, c);
+        if (mate && mate.energy > cfg.reproThreshold * 0.5) {
+          // Sexual: crossover
+          childBrain = crossoverBrain(c.brain, mate.brain);
+          mutateBrain(childBrain);
+          childGenes = crossoverGenes(c.genes, mate.genes);
+          childGenes = mutateGenes(childGenes);
+          mate.energy -= cfg.reproCost * 0.3;
+          mate.mateCooldown = 120;
+          mate.flash = 0.6;
+        } else {
+          // No mate found, fall back to asexual
+          childBrain = cloneBrain(c.brain);
+          mutateBrain(childBrain);
+          childGenes = mutateGenes(c.genes);
+        }
+      } else {
+        // Asexual
+        childBrain = cloneBrain(c.brain);
+        mutateBrain(childBrain);
+        childGenes = mutateGenes(c.genes);
+      }
+
+      const offset = c.genes.size * 3;
+      const child = createCreature(
+        c.x + (Math.random() - 0.5) * offset,
+        c.y + (Math.random() - 0.5) * offset,
+        childBrain, childGenes, c.generation + 1
+      );
+      child.energy = cfg.reproCost * 0.6;
+      c.energy -= cfg.reproCost;
+      c.children++;
+      c.mateCooldown = 60;
+      c.flash = 0.8;
+      creatures.push(child);
+      totalBirths++;
+      aliveCount++;
+      generation = Math.max(generation, child.generation);
+    }
+  }
+
+  // Remove eaten food
+  food = food.filter(f => !f.eaten);
+
+  // Cull dead
+  if (simTime % 120 === 0) {
+    creatures = creatures.filter(c => c.alive);
+  }
+
+  // Replenish if population crashes
+  if (aliveCount < 5 && aliveCount < cfg.maxPop) {
+    for (let i = 0; i < 10; i++) {
+      creatures.push(createCreature());
+      totalBirths++;
+    }
+    aliveCount += 10;
+  }
+
+  // Update species every ~3 seconds
+  if (simTime % 180 === 0) {
+    updateSpecies();
+  }
+
+  // Record history every 60 frames
+  if (simTime % 60 === 0) {
+    popHistory.push(aliveCount);
+    if (popHistory.length > 300) popHistory.shift();
+
+    if (aliveCount > 0) {
+      let avgSpeed = 0, avgSize = 0, avgSense = 0, avgEff = 0;
+      for (const c of creatures) {
+        if (!c.alive) continue;
+        avgSpeed += c.genes.speed;
+        avgSize += c.genes.size;
+        avgSense += c.genes.senseRange;
+        avgEff += c.genes.efficiency;
+      }
+      traitHistory.push({
+        speed: avgSpeed / aliveCount,
+        size: avgSize / aliveCount,
+        sense: avgSense / aliveCount,
+        efficiency: avgEff / aliveCount,
+      });
+      if (traitHistory.length > 300) traitHistory.shift();
+    }
+
+    // Species history snapshot
+    const snap = {};
+    for (const sp of species) snap[sp.id] = sp.count;
+    speciesHistory.push(snap);
+    if (speciesHistory.length > 300) speciesHistory.shift();
+  }
+}
+
+// === Rendering ===
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Background
+  const grad = ctx.createRadialGradient(
+    canvas.width / 2, canvas.height / 2, 0,
+    canvas.width / 2, canvas.height / 2, canvas.width * 0.7
+  );
+  grad.addColorStop(0, '#0d0d18');
+  grad.addColorStop(1, '#060610');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Food zones (niches mode)
+  if (cfg.niches) {
+    for (const zone of cfg.foodZones) {
+      const colors = ['rgba(60,120,60,0.06)', 'rgba(120,60,60,0.06)'];
+      ctx.beginPath();
+      ctx.arc(zone.x, zone.y, zone.r, 0, Math.PI * 2);
+      ctx.fillStyle = colors[zone.type] || colors[0];
+      ctx.fill();
+      ctx.strokeStyle = colors[zone.type].replace('0.06', '0.15');
+      ctx.stroke();
+    }
+  }
+
+  // Islands
+  if (cfg.islands) {
+    for (const ob of obstacles) {
+      ctx.beginPath();
+      ctx.arc(ob.x, ob.y, ob.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(20,40,20,0.3)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(40,80,40,0.15)';
+      ctx.stroke();
+    }
+  }
+
+  // Food
+  for (const f of food) {
+    f.pulse += 0.03;
+    const r = 2.5 + Math.sin(f.pulse) * 0.5;
+    const alpha = 0.5 + Math.sin(f.pulse) * 0.2;
+    const foodHue = cfg.niches ? (f.type < 0.5 ? '120,220,100' : '220,120,100') : '120,220,100';
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${foodHue},${alpha})`;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, r + 3, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${foodHue},${alpha * 0.15})`;
+    ctx.fill();
+  }
+
+  // Creatures
+  for (const c of creatures) {
+    if (!c.alive) continue;
+    const s = c.genes.size;
+    const hue = c.genes.hue;
+    const sat = c.isPredator ? 90 : 70;
+    const light = 50 + c.flash * 30;
+    const energyFrac = Math.min(1, c.energy / 150);
+
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(c.angle);
+
+    // Sense range (only for selected)
+    if (c === selectedCreature) {
+      ctx.beginPath();
+      ctx.arc(0, 0, c.genes.senseRange, 0, Math.PI * 2);
+      ctx.strokeStyle = `hsla(${hue},${sat}%,50%,0.1)`;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Trail
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.5, 0);
+    ctx.lineTo(-s * 2, 0);
+    ctx.strokeStyle = `hsla(${hue},${sat}%,${light}%,0.2)`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Body
+    const elongation = 0.6 + c.genes.speed * 0.3;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s * elongation, s * 0.7, 0, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${hue},${sat}%,${light}%,${0.5 + energyFrac * 0.4})`;
+    ctx.fill();
+
+    // Species ring
+    if (c.speciesId >= 0) {
+      ctx.strokeStyle = SPECIES_COLORS[c.speciesId % SPECIES_COLORS.length];
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.4;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.strokeStyle = `hsla(${hue},${sat}%,${light + 15}%,0.4)`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+
+    // Eye
+    ctx.beginPath();
+    ctx.arc(s * elongation * 0.5, 0, s * 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${0.4 + energyFrac * 0.4})`;
+    ctx.fill();
+
+    // Predator fang
+    if (c.isPredator || c.genes.aggressiveness > 0.3) {
+      ctx.beginPath();
+      ctx.moveTo(s * elongation, 0);
+      ctx.lineTo(s * elongation + 3, -2);
+      ctx.lineTo(s * elongation + 3, 2);
+      ctx.closePath();
+      ctx.fillStyle = `hsla(0,80%,60%,${c.genes.aggressiveness})`;
+      ctx.fill();
+    }
+
+    // Flash effect
+    if (c.flash > 0) {
+      ctx.beginPath();
+      ctx.arc(0, 0, s * 2, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${hue},80%,70%,${c.flash * 0.3})`;
+      ctx.fill();
+    }
+
+    ctx.restore();
+
+    // Energy bar
+    const barW = s * 2;
+    const barH = 1.5;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(c.x - barW / 2, c.y + s + 2, barW, barH);
+    ctx.fillStyle = energyFrac > 0.3 ? `hsla(${hue},60%,50%,0.6)` : 'rgba(255,80,80,0.6)';
+    ctx.fillRect(c.x - barW / 2, c.y + s + 2, barW * energyFrac, barH);
+  }
+
+  // Selected creature highlight
+  if (selectedCreature && selectedCreature.alive) {
+    ctx.beginPath();
+    ctx.arc(selectedCreature.x, selectedCreature.y, selectedCreature.genes.size + 6, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(200,180,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineWidth = 1;
+  }
+
+  drawGraph();
+}
+
+function drawGraph() {
+  const gw = 264, gh = 80;
+  graphCtx.clearRect(0, 0, gw, gh);
+
+  if (graphTab === 'pop') {
+    if (popHistory.length > 1) {
+      const maxVal = Math.max(20, ...popHistory);
+      graphCtx.beginPath();
+      graphCtx.moveTo(0, gh);
+      for (let i = 0; i < popHistory.length; i++) {
+        const x = (i / (popHistory.length - 1)) * gw;
+        const y = gh - (popHistory[i] / maxVal) * (gh - 10);
+        graphCtx.lineTo(x, y);
+      }
+      graphCtx.lineTo(gw, gh);
+      graphCtx.closePath();
+      graphCtx.fillStyle = 'rgba(127,219,202,0.15)';
+      graphCtx.fill();
+      graphCtx.beginPath();
+      for (let i = 0; i < popHistory.length; i++) {
+        const x = (i / (popHistory.length - 1)) * gw;
+        const y = gh - (popHistory[i] / maxVal) * (gh - 10);
+        i === 0 ? graphCtx.moveTo(x, y) : graphCtx.lineTo(x, y);
+      }
+      graphCtx.strokeStyle = '#7fdbca';
+      graphCtx.lineWidth = 1.5;
+      graphCtx.stroke();
+    }
+  } else if (graphTab === 'traits') {
+    if (traitHistory.length > 1) {
+      const drawLine = (key, color, min, max) => {
+        graphCtx.beginPath();
+        for (let i = 0; i < traitHistory.length; i++) {
+          const x = (i / (traitHistory.length - 1)) * gw;
+          const v = (traitHistory[i][key] - min) / (max - min);
+          const y = gh - v * (gh - 10) - 5;
+          i === 0 ? graphCtx.moveTo(x, y) : graphCtx.lineTo(x, y);
+        }
+        graphCtx.strokeStyle = color;
+        graphCtx.lineWidth = 1;
+        graphCtx.stroke();
+      };
+      drawLine('speed', '#ff7eb6', 0.3, 2.5);
+      drawLine('size', '#f0c674', 2, 15);
+      drawLine('efficiency', '#82aaff', 0.3, 1.8);
+      graphCtx.font = '8px monospace';
+      graphCtx.fillStyle = '#ff7eb6'; graphCtx.fillText('spd', gw - 60, 10);
+      graphCtx.fillStyle = '#f0c674'; graphCtx.fillText('size', gw - 40, 10);
+      graphCtx.fillStyle = '#82aaff'; graphCtx.fillText('eff', gw - 18, 10);
+    }
+  } else if (graphTab === 'species') {
+    // Stacked area chart of species populations
+    if (speciesHistory.length > 1) {
+      // Collect all species IDs that appear
+      const allIds = new Set();
+      for (const snap of speciesHistory) {
+        for (const id of Object.keys(snap)) allIds.add(+id);
+      }
+      const ids = [...allIds].sort((a, b) => a - b);
+
+      if (ids.length > 0) {
+        const maxPop = Math.max(20, ...speciesHistory.map(s => {
+          let t = 0; for (const id of ids) t += (s[id] || 0); return t;
+        }));
+
+        // Draw stacked from bottom
+        for (let si = ids.length - 1; si >= 0; si--) {
+          const id = ids[si];
+          graphCtx.beginPath();
+          graphCtx.moveTo(0, gh);
+          for (let i = 0; i < speciesHistory.length; i++) {
+            const x = (i / (speciesHistory.length - 1)) * gw;
+            let stackVal = 0;
+            for (let j = 0; j <= si; j++) stackVal += (speciesHistory[i][ids[j]] || 0);
+            const y = gh - (stackVal / maxPop) * (gh - 10);
+            graphCtx.lineTo(x, y);
+          }
+          graphCtx.lineTo(gw, gh);
+          graphCtx.closePath();
+          const color = SPECIES_COLORS[id % SPECIES_COLORS.length];
+          graphCtx.fillStyle = color + '40';
+          graphCtx.fill();
+          graphCtx.strokeStyle = color + '80';
+          graphCtx.lineWidth = 0.5;
+          graphCtx.stroke();
+        }
+      }
+    }
+  }
+}
+
+function updateTabs() {
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(t => t.classList.remove('active'));
+  const labels = { pop: 'Population over time', traits: 'Average traits', species: 'Species populations' };
+  document.getElementById('graph-label').textContent = labels[graphTab];
+  tabs[graphTab === 'pop' ? 0 : graphTab === 'traits' ? 1 : 2].classList.add('active');
+}
+
+// === UI Updates ===
+function updateUI() {
+  document.getElementById('s-gen').textContent = generation;
+  document.getElementById('s-pop').textContent = aliveCount;
+  document.getElementById('s-cap').textContent = cfg.maxPop;
+  document.getElementById('s-food').textContent = food.length;
+  document.getElementById('s-births').textContent = totalBirths;
+  document.getElementById('s-deaths').textContent = totalDeaths;
+  document.getElementById('s-time').textContent = (simTime / 60).toFixed(0);
+  document.getElementById('s-speed').textContent = cfg.speedMul;
+  document.getElementById('s-species').textContent = species.length;
+
+  let oldest = 0;
+  let totalFitness = 0;
+  for (const c of creatures) {
+    if (!c.alive) continue;
+    if (c.age > oldest) oldest = c.age;
+    totalFitness += c.foodEaten + c.children * 3;
+  }
+  document.getElementById('s-oldest').textContent = (oldest / 60).toFixed(1);
+  document.getElementById('s-fitness').textContent = aliveCount > 0 ? (totalFitness / aliveCount).toFixed(1) : '0';
+
+  document.getElementById('btn-pause').textContent = paused ? 'Play' : 'Pause';
+
+  // Species list
+  const spList = document.getElementById('species-list');
+  if (species.length > 0) {
+    spList.innerHTML = species.sort((a, b) => b.count - a.count).map(sp =>
+      `<div><span class="species-dot" style="background:${sp.color}"></span>` +
+      `Sp${sp.id}: ${sp.count} — spd:${sp.avgSpeed.toFixed(1)} sz:${sp.avgSize.toFixed(1)} ` +
+      `${sp.avgAggr > 0.3 ? '&#9876;' : ''}</div>`
+    ).join('');
+  } else {
+    spList.innerHTML = 'Clustering...';
+  }
+
+  // Selected creature info
+  const info = document.getElementById('selected-info');
+  const detail = document.getElementById('creature-detail');
+  if (selectedCreature && selectedCreature.alive) {
+    info.classList.add('show');
+    const sp = species.find(s => s.id === selectedCreature.speciesId);
+    detail.innerHTML = `
+      Gen: <span>${selectedCreature.generation}</span> &middot; Age: <span>${(selectedCreature.age / 60).toFixed(1)}s</span><br>
+      Energy: <span>${selectedCreature.energy.toFixed(0)}</span> &middot; Food: <span>${selectedCreature.foodEaten}</span> &middot; Children: <span>${selectedCreature.children}</span><br>
+      Speed: <span>${selectedCreature.genes.speed.toFixed(2)}</span> &middot;
+      Size: <span>${selectedCreature.genes.size.toFixed(1)}</span> &middot;
+      Sense: <span>${selectedCreature.genes.senseRange.toFixed(0)}</span><br>
+      Efficiency: <span>${selectedCreature.genes.efficiency.toFixed(2)}</span> &middot;
+      Aggression: <span>${selectedCreature.genes.aggressiveness.toFixed(2)}</span><br>
+      Diet pref: <span>${selectedCreature.genes.dietPref.toFixed(2)}</span> &middot;
+      Hue: <span style="color:hsl(${selectedCreature.genes.hue},70%,60%)">${selectedCreature.genes.hue.toFixed(0)}&deg;</span><br>
+      Species: <span>${sp ? 'Sp' + sp.id + ' (' + sp.count + ')' : 'loner'}</span>
+    `;
+  } else {
+    info.classList.remove('show');
+    selectedCreature = null;
+  }
+}
+
+// === Main loop ===
+function loop() {
+  if (!paused) {
+    for (let i = 0; i < cfg.speedMul; i++) step();
+  }
+  draw();
+  if (simTime % 15 === 0) updateUI();
+  animId = requestAnimationFrame(loop);
+}
+
+// === Controls ===
+function toggleUI() {
+  document.getElementById('ui').classList.toggle('collapsed');
+  resize();
+}
+
+function togglePause() { paused = !paused; }
+
+function cycleSpeed() {
+  const speeds = [1, 2, 4, 8];
+  const idx = speeds.indexOf(cfg.speedMul);
+  cfg.speedMul = speeds[(idx + 1) % speeds.length];
+}
+
+function resetWorld() {
+  creatures = [];
+  food = [];
+  obstacles = [];
+  generation = 0;
+  totalBirths = 0;
+  totalDeaths = 0;
+  simTime = 0;
+  popHistory = [];
+  traitHistory = [];
+  speciesHistory = [];
+  species = [];
+  nextSpeciesId = 0;
+  selectedCreature = null;
+  aliveCount = 0;
+
+  if (cfg.islands) {
+    const numIslands = 4 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < numIslands; i++) {
+      obstacles.push({
+        x: 100 + Math.random() * (cfg.worldW - 200),
+        y: 100 + Math.random() * (cfg.worldH - 200),
+        r: 60 + Math.random() * 100,
+      });
+    }
+  }
+
+  if (cfg.niches) {
+    cfg.foodZones = [];
+    // Create 4-6 food zones, alternating types
+    const numZones = 4 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < numZones; i++) {
+      cfg.foodZones.push({
+        x: 80 + Math.random() * (cfg.worldW - 160),
+        y: 80 + Math.random() * (cfg.worldH - 160),
+        r: 80 + Math.random() * 100,
+        type: i % 2, // alternating green/red
+      });
+    }
+  }
+
+  for (let i = 0; i < cfg.initialPop; i++) {
+    creatures.push(createCreature());
+  }
+  for (let i = 0; i < 60; i++) spawnFood();
+}
+
+function loadScenario(name) {
+  // Reset to defaults
+  cfg.foodRate = 1; cfg.foodValue = 60; cfg.foodMax = 150;
+  cfg.mutationRate = 0.1; cfg.mutationStrength = 0.3;
+  cfg.initialPop = 40; cfg.maxPop = 200; cfg.maxAge = 1800;
+  cfg.energyDrain = 0.15; cfg.reproThreshold = 150; cfg.reproCost = 80;
+  cfg.predators = false; cfg.islands = false; cfg.sexualRate = 0;
+  cfg.niches = false; cfg.foodZones = [];
+
+  switch (name) {
+    case 'sexual':
+      cfg.sexualRate = 0.8;
+      cfg.foodRate = 1.2;
+      break;
+    case 'scarce':
+      cfg.foodRate = 0.3; cfg.foodMax = 60; cfg.foodValue = 40;
+      cfg.maxPop = 100;
+      break;
+    case 'abundant':
+      cfg.foodRate = 3; cfg.foodMax = 300; cfg.foodValue = 80;
+      cfg.maxPop = 300;
+      break;
+    case 'predators':
+      cfg.predators = true;
+      cfg.foodRate = 1.5; cfg.maxPop = 250;
+      break;
+    case 'islands':
+      cfg.islands = true;
+      cfg.foodRate = 0.8; cfg.maxPop = 150;
+      break;
+    case 'radiation':
+      cfg.mutationRate = 0.4; cfg.mutationStrength = 0.6;
+      cfg.foodRate = 1.5;
+      break;
+    case 'niches':
+      cfg.niches = true;
+      cfg.foodRate = 2.5; cfg.foodMax = 300;
+      cfg.foodValue = 80;
+      cfg.sexualRate = 0.5;
+      cfg.maxPop = 250;
+      cfg.initialPop = 60;
+      cfg.energyDrain = 0.12;
+      break;
+    case 'arms-race':
+      cfg.predators = true;
+      cfg.sexualRate = 0.6;
+      cfg.foodRate = 2; cfg.maxPop = 300;
+      cfg.mutationRate = 0.15;
+      break;
+  }
+
+  // Sync sliders
+  document.getElementById('sl-mutation').value = cfg.mutationRate;
+  document.getElementById('v-mutation').textContent = cfg.mutationRate;
+  document.getElementById('sl-food').value = cfg.foodRate;
+  document.getElementById('v-food').textContent = cfg.foodRate;
+  document.getElementById('sl-fval').value = cfg.foodValue;
+  document.getElementById('v-fval').textContent = cfg.foodValue;
+  document.getElementById('sl-sexual').value = cfg.sexualRate;
+  document.getElementById('v-sexual').textContent = cfg.sexualRate;
+
+  resetWorld();
+}
+
+// === Input ===
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  let closest = null, closestDist = 400;
+  for (const c of creatures) {
+    if (!c.alive) continue;
+    const d2 = (c.x - mx) ** 2 + (c.y - my) ** 2;
+    if (d2 < closestDist) { closestDist = d2; closest = c; }
+  }
+  selectedCreature = closest;
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === ' ') { togglePause(); e.preventDefault(); }
+  if (e.key === 'h' || e.key === 'H') toggleUI();
+  if (e.key === 'n' || e.key === 'N') resetWorld();
+  if (e.key === '1') cfg.speedMul = 1;
+  if (e.key === '2') cfg.speedMul = 2;
+  if (e.key === '3') cfg.speedMul = 4;
+  if (e.key === '4') cfg.speedMul = 8;
+});
+
+// Visibility API
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && animId) {
+    cancelAnimationFrame(animId);
+    animId = null;
+  } else if (!document.hidden && !animId) {
+    animId = requestAnimationFrame(loop);
+  }
+});
+
+// === Init ===
+resetWorld();
+loop();
+</script>
+</body>
+</html>

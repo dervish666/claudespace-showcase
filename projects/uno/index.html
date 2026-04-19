@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uno!</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a5c2a;
+  background-image: radial-gradient(ellipse at center, #1e6b30 0%, #0d3518 100%);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-x: hidden;
+  user-select: none;
+}
+
+h1 {
+  color: #fff;
+  font-size: 1.3rem;
+  margin: 0.8rem 0 0.3rem;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  letter-spacing: 0.05em;
+  font-weight: 400;
+}
+
+/* Game areas */
+.opponent-area {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  padding: 0.5rem;
+  min-height: 90px;
+  flex-wrap: wrap;
+  max-width: 90vw;
+}
+
+.middle-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  padding: 1rem 0;
+  position: relative;
+}
+
+.player-area {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  padding: 0.5rem 1rem 1rem;
+  flex-wrap: wrap;
+  max-width: 95vw;
+}
+
+/* Cards */
+.card {
+  width: 70px;
+  height: 105px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  cursor: default;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  transition: transform 0.15s, box-shadow 0.15s;
+  border: 3px solid rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+
+.card-inner {
+  background: rgba(255,255,255,0.15);
+  border-radius: 50%;
+  width: 50px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 40%;
+  transform: rotate(-20deg);
+}
+
+.card.red { background: #d72626; }
+.card.blue { background: #2962ff; }
+.card.green { background: #2e7d32; }
+.card.yellow { background: #f9a825; color: #333; text-shadow: none; }
+.card.wild { background: linear-gradient(135deg, #d72626 25%, #2962ff 25%, #2962ff 50%, #2e7d32 50%, #2e7d32 75%, #f9a825 75%); }
+
+.card.back {
+  background: #222;
+  border-color: #444;
+}
+.card.back .card-inner {
+  background: linear-gradient(135deg, #d72626 25%, #2962ff 25%, #2962ff 50%, #2e7d32 50%, #2e7d32 75%, #f9a825 75%);
+  font-size: 0.7rem;
+  color: #fff;
+  font-weight: 900;
+}
+
+.card.playable {
+  cursor: pointer;
+  animation: glow 1.5s ease-in-out infinite;
+}
+.card.playable:hover {
+  transform: translateY(-12px) scale(1.05);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+  z-index: 10;
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+  50% { box-shadow: 0 2px 12px rgba(255,255,200,0.4); }
+}
+
+.card.small {
+  width: 40px;
+  height: 60px;
+  font-size: 0;
+  border-width: 2px;
+}
+.card.small .card-inner {
+  width: 28px;
+  height: 40px;
+  font-size: 0.5rem;
+}
+
+/* Draw pile & discard */
+.draw-pile {
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.draw-pile:hover {
+  transform: scale(1.05);
+}
+.draw-pile.clickable {
+  animation: glow 1.5s ease-in-out infinite;
+}
+
+.discard-pile .card {
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+}
+
+/* Status */
+.status {
+  color: #fff;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.8rem;
+  background: rgba(0,0,0,0.3);
+  border-radius: 20px;
+  margin: 0.3rem 0;
+  text-align: center;
+}
+
+.info-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 0.3rem 0;
+}
+
+/* UNO button */
+.uno-btn {
+  background: #d72626;
+  color: #fff;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  font-size: 0.9rem;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+  transition: transform 0.15s;
+  position: absolute;
+  right: -100px;
+}
+.uno-btn:hover { transform: scale(1.1); }
+.uno-btn.hidden { display: none; }
+
+/* Colour picker modal */
+.colour-picker {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 100;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+}
+.colour-picker.active {
+  display: flex;
+  flex-direction: column;
+}
+.colour-picker h2 {
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 400;
+}
+.colour-options {
+  display: flex;
+  gap: 1rem;
+}
+.colour-option {
+  width: 80px;
+  height: 80px;
+  border-radius: 12px;
+  border: 4px solid rgba(255,255,255,0.5);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.colour-option:hover {
+  transform: scale(1.15);
+  border-color: #fff;
+}
+
+/* Game over overlay */
+.game-over {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  z-index: 100;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  gap: 1rem;
+}
+.game-over.active { display: flex; }
+.game-over h2 {
+  color: #fff;
+  font-size: 2rem;
+}
+.game-over p { color: #ccc; }
+.game-over button {
+  background: #d72626;
+  color: #fff;
+  border: none;
+  padding: 0.8rem 2rem;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.game-over button:hover { background: #e53935; }
+
+.direction {
+  color: rgba(255,255,255,0.3);
+  font-size: 1.5rem;
+  position: absolute;
+  left: -40px;
+}
+</style>
+</head>
+<body>
+
+<h1>Uno!</h1>
+
+<div class="info-row">
+  <div class="status" id="status">Your turn</div>
+</div>
+
+<div class="opponent-area" id="opponent-hand"></div>
+
+<div class="middle-area">
+  <div class="direction" id="direction-arrow"></div>
+  <div class="draw-pile" id="draw-pile" onclick="playerDraw()">
+    <div class="card back"><div class="card-inner">UNO</div></div>
+  </div>
+  <div class="discard-pile" id="discard-pile"></div>
+  <button class="uno-btn hidden" id="uno-btn" onclick="callUno()">UNO!</button>
+</div>
+
+<div class="player-area" id="player-hand"></div>
+
+<div class="colour-picker" id="colour-picker">
+  <h2>Choose a colour</h2>
+  <div class="colour-options">
+    <div class="colour-option" style="background:#d72626" onclick="pickColour('red')"></div>
+    <div class="colour-option" style="background:#2962ff" onclick="pickColour('blue')"></div>
+    <div class="colour-option" style="background:#2e7d32" onclick="pickColour('green')"></div>
+    <div class="colour-option" style="background:#f9a825" onclick="pickColour('yellow')"></div>
+  </div>
+</div>
+
+<div class="game-over" id="game-over">
+  <h2 id="winner-text"></h2>
+  <p id="score-text"></p>
+  <button onclick="newGame()">Play Again</button>
+</div>
+
+<script>
+const COLORS = ['red', 'blue', 'green', 'yellow'];
+const VALUES = ['0','1','2','3','4','5','6','7','8','9','Skip','Rev','D2'];
+const DISPLAY = {
+  'Skip': '\u{1F6AB}', 'Rev': '\u{1F500}', 'D2': '+2',
+  'Wild': '\u{1F308}', 'WD4': '+4'
+};
+
+let deck, playerHand, aiHand, discardPile, currentColour, currentValue;
+let isPlayerTurn, gameOver, direction, calledUno, pendingWild;
+let scores = { player: 0, ai: 0 };
+
+function createDeck() {
+  const d = [];
+  for (const c of COLORS) {
+    d.push({ color: c, value: '0' });
+    for (let i = 0; i < 2; i++) {
+      for (const v of VALUES.slice(1)) {
+        d.push({ color: c, value: v });
+      }
+    }
+  }
+  for (let i = 0; i < 4; i++) {
+    d.push({ color: 'wild', value: 'Wild' });
+    d.push({ color: 'wild', value: 'WD4' });
+  }
+  return d;
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function drawCard() {
+  if (deck.length === 0) {
+    // Reshuffle discard pile except top card
+    const top = discardPile.pop();
+    deck = shuffle(discardPile);
+    discardPile = [top];
+  }
+  return deck.pop();
+}
+
+function canPlay(card) {
+  if (card.color === 'wild') return true;
+  if (card.color === currentColour) return true;
+  if (card.value === currentValue) return true;
+  return false;
+}
+
+function cardLabel(card) {
+  return DISPLAY[card.value] || card.value;
+}
+
+function renderCard(card, playable, onclick) {
+  const div = document.createElement('div');
+  div.className = `card ${card.color}${playable ? ' playable' : ''}`;
+  const inner = document.createElement('div');
+  inner.className = 'card-inner';
+  inner.textContent = cardLabel(card);
+  div.appendChild(inner);
+  if (onclick) div.addEventListener('click', onclick);
+  return div;
+}
+
+function renderBackCard() {
+  const div = document.createElement('div');
+  div.className = 'card back small';
+  const inner = document.createElement('div');
+  inner.className = 'card-inner';
+  inner.textContent = 'UNO';
+  div.appendChild(inner);
+  return div;
+}
+
+function render() {
+  // Opponent hand
+  const oppEl = document.getElementById('opponent-hand');
+  oppEl.innerHTML = '';
+  for (let i = 0; i < aiHand.length; i++) {
+    oppEl.appendChild(renderBackCard());
+  }
+
+  // Discard pile
+  const discEl = document.getElementById('discard-pile');
+  discEl.innerHTML = '';
+  if (discardPile.length > 0) {
+    const top = discardPile[discardPile.length - 1];
+    // Show with current colour for wilds
+    const displayCard = top.color === 'wild' ? { color: currentColour, value: top.value } : top;
+    discEl.appendChild(renderCard(displayCard, false));
+  }
+
+  // Player hand
+  const playerEl = document.getElementById('player-hand');
+  playerEl.innerHTML = '';
+  const hasPlayable = playerHand.some(c => canPlay(c));
+  playerHand.forEach((card, i) => {
+    const playable = isPlayerTurn && !gameOver && canPlay(card);
+    playerEl.appendChild(renderCard(card, playable, playable ? () => playCard(i) : null));
+  });
+
+  // Draw pile clickable when player has no playable cards
+  const drawEl = document.getElementById('draw-pile');
+  drawEl.className = `draw-pile${isPlayerTurn && !gameOver ? ' clickable' : ''}`;
+
+  // UNO button
+  const unoBtn = document.getElementById('uno-btn');
+  if (isPlayerTurn && playerHand.length === 2 && !calledUno) {
+    unoBtn.classList.remove('hidden');
+  } else {
+    unoBtn.classList.add('hidden');
+  }
+
+  // Direction arrow
+  document.getElementById('direction-arrow').textContent = direction === 1 ? '\u27F3' : '\u27F2';
+
+  // AI hand count in status
+  updateStatus();
+}
+
+function updateStatus(msg) {
+  const el = document.getElementById('status');
+  const aiCount = aiHand ? aiHand.length : 0;
+  const extra = msg ? msg : (isPlayerTurn ? 'Your turn' : 'Computer thinking...');
+  el.textContent = `${extra}  |  Computer: ${aiCount} cards  |  Score: You ${scores.player} - ${scores.ai} Computer`;
+}
+
+function playCard(index) {
+  if (!isPlayerTurn || gameOver) return;
+  const card = playerHand[index];
+  if (!canPlay(card)) return;
+
+  playerHand.splice(index, 1);
+  discardPile.push(card);
+
+  if (card.color === 'wild') {
+    pendingWild = card;
+    document.getElementById('colour-picker').classList.add('active');
+    return;
+  }
+
+  applyCard(card);
+}
+
+function pickColour(colour) {
+  document.getElementById('colour-picker').classList.remove('active');
+  currentColour = colour;
+  if (pendingWild) {
+    applyCard(pendingWild);
+    pendingWild = null;
+  }
+}
+
+function applyCard(card) {
+  if (card.color !== 'wild') {
+    currentColour = card.color;
+  }
+  currentValue = card.value;
+
+  // Check for win
+  if (playerHand.length === 0) {
+    endGame(true);
+    return;
+  }
+
+  // Check UNO call
+  if (playerHand.length === 1 && !calledUno) {
+    // Penalty: draw 2 cards
+    playerHand.push(drawCard(), drawCard());
+    updateStatus('Forgot to call UNO! +2 cards');
+  }
+  calledUno = false;
+
+  // Apply special effects
+  let skipNext = false;
+  if (card.value === 'Skip') {
+    skipNext = true;
+  } else if (card.value === 'Rev') {
+    direction *= -1;
+    // In 2-player, reverse acts like skip
+    skipNext = true;
+  } else if (card.value === 'D2') {
+    aiHand.push(drawCard(), drawCard());
+    skipNext = true;
+  } else if (card.value === 'WD4') {
+    aiHand.push(drawCard(), drawCard(), drawCard(), drawCard());
+    skipNext = true;
+  }
+
+  render();
+
+  if (skipNext) {
+    // Player gets another turn
+    setTimeout(() => { isPlayerTurn = true; render(); }, 600);
+  } else {
+    isPlayerTurn = false;
+    render();
+    setTimeout(aiTurn, 800 + Math.random() * 600);
+  }
+}
+
+function playerDraw() {
+  if (!isPlayerTurn || gameOver) return;
+  const card = drawCard();
+  playerHand.push(card);
+
+  if (canPlay(card)) {
+    // Can play the drawn card immediately
+    render();
+    updateStatus('Drew a card — you can play it!');
+  } else {
+    isPlayerTurn = false;
+    render();
+    updateStatus('Drew a card — cannot play it');
+    setTimeout(aiTurn, 800);
+  }
+}
+
+function callUno() {
+  calledUno = true;
+  document.getElementById('uno-btn').classList.add('hidden');
+  updateStatus('UNO!');
+}
+
+function aiTurn() {
+  if (gameOver) return;
+
+  // AI strategy: play special cards first, match colour, then value, wilds last
+  let bestIndex = -1;
+  let bestScore = -1;
+
+  aiHand.forEach((card, i) => {
+    if (!canPlay(card)) return;
+    let score = 0;
+    if (card.value === 'WD4') score = 1; // save wilds
+    else if (card.value === 'Wild') score = 2;
+    else if (card.value === 'D2') score = 15;
+    else if (card.value === 'Skip') score = 14;
+    else if (card.value === 'Rev') score = 13;
+    else if (card.color === currentColour) score = 10;
+    else score = 5;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  });
+
+  if (bestIndex === -1) {
+    // Draw a card
+    const card = drawCard();
+    aiHand.push(card);
+    if (canPlay(card)) {
+      // Play it
+      const idx = aiHand.length - 1;
+      aiHand.splice(idx, 1);
+      discardPile.push(card);
+      if (card.color === 'wild') {
+        // AI picks most common colour in hand
+        currentColour = aiPickColour();
+      } else {
+        currentColour = card.color;
+      }
+      currentValue = card.value;
+      return aiFinishTurn(card);
+    }
+    isPlayerTurn = true;
+    render();
+    return;
+  }
+
+  const card = aiHand[bestIndex];
+  aiHand.splice(bestIndex, 1);
+  discardPile.push(card);
+
+  if (card.color === 'wild') {
+    currentColour = aiPickColour();
+  } else {
+    currentColour = card.color;
+  }
+  currentValue = card.value;
+  aiFinishTurn(card);
+}
+
+function aiPickColour() {
+  const counts = { red: 0, blue: 0, green: 0, yellow: 0 };
+  aiHand.forEach(c => { if (counts[c.color] !== undefined) counts[c.color]++; });
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function aiFinishTurn(card) {
+  if (aiHand.length === 0) {
+    render();
+    endGame(false);
+    return;
+  }
+
+  // AI "calls UNO" (visual cue)
+  if (aiHand.length === 1) {
+    updateStatus('Computer says UNO!');
+  }
+
+  let skipNext = false;
+  if (card.value === 'Skip' || card.value === 'Rev') {
+    direction = card.value === 'Rev' ? direction * -1 : direction;
+    skipNext = true;
+  } else if (card.value === 'D2') {
+    playerHand.push(drawCard(), drawCard());
+    skipNext = true;
+  } else if (card.value === 'WD4') {
+    playerHand.push(drawCard(), drawCard(), drawCard(), drawCard());
+    skipNext = true;
+  }
+
+  if (skipNext) {
+    render();
+    setTimeout(aiTurn, 800 + Math.random() * 600);
+  } else {
+    isPlayerTurn = true;
+    render();
+  }
+}
+
+function endGame(playerWon) {
+  gameOver = true;
+  // Score: sum of losing hand
+  const loserHand = playerWon ? aiHand : playerHand;
+  let points = 0;
+  loserHand.forEach(c => {
+    if (c.value === 'Wild' || c.value === 'WD4') points += 50;
+    else if (c.value === 'Skip' || c.value === 'Rev' || c.value === 'D2') points += 20;
+    else points += parseInt(c.value) || 0;
+  });
+
+  if (playerWon) scores.player += points;
+  else scores.ai += points;
+
+  render();
+  document.getElementById('winner-text').textContent = playerWon ? 'You Win!' : 'Computer Wins!';
+  document.getElementById('score-text').textContent = `+${points} points | Total: You ${scores.player} - ${scores.ai} Computer`;
+  document.getElementById('game-over').classList.add('active');
+}
+
+function newGame() {
+  document.getElementById('game-over').classList.remove('active');
+  deck = shuffle(createDeck());
+  playerHand = [];
+  aiHand = [];
+  discardPile = [];
+  direction = 1;
+  calledUno = false;
+  pendingWild = null;
+  gameOver = false;
+
+  for (let i = 0; i < 7; i++) {
+    playerHand.push(drawCard());
+    aiHand.push(drawCard());
+  }
+
+  // First discard card (must be a number)
+  let first;
+  do { first = drawCard(); } while (first.color === 'wild' || ['Skip','Rev','D2'].includes(first.value));
+  discardPile.push(first);
+  currentColour = first.color;
+  currentValue = first.value;
+
+  isPlayerTurn = true;
+  render();
+}
+
+newGame();
+</script>
+</body>
+</html>

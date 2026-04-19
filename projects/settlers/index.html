@@ -1,0 +1,3640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settlers</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;color:#c8d8e8}
+canvas{display:block;cursor:default;margin-left:220px}
+#ui{position:fixed;top:0;left:0;bottom:0;width:220px;background:rgba(15,20,35,0.92);border-right:1px solid #2a3a50;display:flex;flex-direction:column;z-index:10;backdrop-filter:blur(8px)}
+#ui h2{padding:12px 16px 8px;font-size:14px;letter-spacing:2px;color:#6a9ac0;font-weight:400;border-bottom:1px solid #1a2a40}
+#resources{padding:8px 16px;display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:11px;border-bottom:1px solid #1a2a40}
+#resources .res{display:flex;align-items:center;gap:4px;padding:2px 0}
+#resources .res .icon{font-size:13px}
+#resources .res .val{color:#a0c0e0;font-weight:600}
+#buildings{flex:1;overflow-y:auto;padding:8px}
+#buildings::-webkit-scrollbar{width:4px}
+#buildings::-webkit-scrollbar-thumb{background:#2a3a50;border-radius:2px}
+.bldg-btn{display:block;width:100%;background:rgba(25,35,55,0.8);border:1px solid #1a2a40;color:#8aa0c0;padding:6px 10px;margin-bottom:4px;text-align:left;cursor:pointer;font-size:11px;font-family:inherit;border-radius:3px;transition:all 0.15s}
+.bldg-btn:hover{border-color:#3a5a80;background:rgba(35,50,75,0.9);color:#aac}
+.bldg-btn.selected{border-color:#4a80c0;color:#8ac0ff;background:rgba(40,60,100,0.5)}
+.bldg-btn .name{font-weight:600;font-size:12px}
+.bldg-btn .cost{color:#607890;font-size:10px;margin-top:2px}
+.bldg-btn .desc{color:#506878;font-size:9px;margin-top:1px}
+#mode-bar{padding:8px;border-top:1px solid #1a2a40;display:flex;gap:4px}
+#mode-bar button{flex:1;background:rgba(25,35,55,0.8);border:1px solid #1a2a40;color:#6a8a a0;padding:5px;cursor:pointer;font-size:10px;font-family:inherit;border-radius:3px}
+#mode-bar button:hover{border-color:#3a5a80;color:#aac}
+#mode-bar button.active{border-color:#4a80c0;color:#8ac0ff}
+#info{position:fixed;bottom:12px;left:232px;background:rgba(15,20,35,0.85);border:1px solid #2a3a50;padding:8px 14px;border-radius:5px;font-size:11px;color:#8aa0c0;backdrop-filter:blur(8px);z-index:10;max-width:500px}
+#speed-controls{position:fixed;top:12px;right:12px;display:flex;gap:4px;z-index:10}
+#speed-controls button{background:rgba(15,20,35,0.85);border:1px solid #2a3a50;color:#6a8aa0;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit;border-radius:3px}
+#speed-controls button:hover{border-color:#3a5a80;color:#aac}
+#speed-controls button.active{border-color:#4a80c0;color:#8ac0ff}
+#tooltip{position:fixed;background:rgba(10,15,25,0.95);border:1px solid #3a5a80;padding:8px 12px;border-radius:4px;font-size:11px;color:#a0c0e0;pointer-events:none;z-index:20;display:none;max-width:200px}
+#tooltip .tt-title{font-weight:600;color:#8ac0ff;margin-bottom:3px}
+#tooltip .tt-line{color:#6a8aa0;font-size:10px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <h2>SETTLERS <span style="font-size:9px;color:#4a6080;cursor:pointer;float:right;margin-top:3px" onclick="newGameConfirm()">New Game</span></h2>
+  <div id="save-bar" style="padding:4px 12px;border-bottom:1px solid #1a2a40;display:flex;gap:4px">
+    <button onclick="saveGame()" style="flex:1;background:rgba(25,55,35,0.8);border:1px solid #2a5030;color:#6ab070;padding:4px;cursor:pointer;font-size:10px;font-family:inherit;border-radius:3px" title="Save game to browser storage">💾 Save</button>
+    <button onclick="loadGame()" style="flex:1;background:rgba(25,35,55,0.8);border:1px solid #2a3a60;color:#6a90c0;padding:4px;cursor:pointer;font-size:10px;font-family:inherit;border-radius:3px" title="Load saved game">📂 Load</button>
+    <span id="save-status" style="font-size:9px;color:#4a6a50;align-self:center;white-space:nowrap"></span>
+  </div>
+  <div id="season-badge" style="padding:6px 12px 4px;border-bottom:1px solid #1a2a40">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+      <span id="season-icon" style="font-size:14px">🌿</span>
+      <span id="season-name" style="font-size:10px;font-weight:600;letter-spacing:1px;color:#6a9058">SPRING</span>
+      <span id="season-day" style="font-size:9px;color:#3a5030;margin-left:auto">Day 1 of 14</span>
+    </div>
+    <div style="background:#1a2a18;border-radius:2px;height:3px;overflow:hidden">
+      <div id="season-progress" style="background:#4a7838;height:100%;width:0%;transition:width 0.5s"></div>
+    </div>
+  </div>
+  <div id="resources"></div>
+  <div id="buildings"></div>
+  <div id="mode-bar">
+    <button id="btn-build" class="active" onclick="setMode('build')">Build (B)</button>
+    <button id="btn-road" onclick="setMode('road')">Road (R)</button>
+    <button id="btn-demolish" onclick="setMode('demolish')">Del (D)</button>
+  </div>
+  <div id="economy" style="padding:6px 12px;border-top:1px solid #1a2a40;font-size:9px;color:#4a6a80;line-height:1.6"></div>
+</div>
+<canvas id="c"></canvas>
+<div id="info">Start by placing a Woodcutter near trees, then use Road mode to connect its flag to the HQ flag · Scroll to zoom · Drag to pan</div>
+<div id="speed-controls">
+  <button onclick="setSpeed(0)" id="sp0">⏸</button>
+  <button onclick="setSpeed(1)" id="sp1" class="active">1×</button>
+  <button onclick="setSpeed(2)" id="sp2">2×</button>
+  <button onclick="setSpeed(4)" id="sp4">4×</button>
+  <button onclick="toggleHelp()" style="margin-left:8px">? Help</button>
+</div>
+<div id="tooltip"></div>
+<script>
+// ===== CONSTANTS =====
+var TW = 64, TH = 32; // tile size in iso
+var MAP_W = 80, MAP_H = 80;
+var canvas = document.getElementById('c');
+var ctx = canvas.getContext('2d');
+
+// Camera
+var cam = {x: 0, y: 0, zoom: 1};
+var dragging = false, dragStart = {x:0,y:0}, camStart = {x:0,y:0};
+
+// Game state
+var mode = 'build'; // build, road, demolish
+var selectedBuilding = null;
+var speed = 1;
+var tick = 0;
+var gameTime = 0; // in-game seconds
+
+// ===== TERRAIN =====
+var TERRAIN = {
+  WATER: 0, GRASS: 1, FOREST: 2, STONE: 3, HILL: 4, SAND: 5, MOUNTAIN: 6
+};
+var TERRAIN_COLORS = {
+  0: ['#2a4a6a','#2a4870','#284468'], // water
+  1: ['#3a6a35','#3d7038','#35653a','#3a7040','#376a3a'], // grass
+  2: ['#2a5a28','#2d5e2c','#285525'], // forest
+  3: ['#6a6a68','#707070','#656568'], // stone
+  4: ['#5a7a4a','#558045','#4d7540'], // hill
+  5: ['#8a8560','#908a65','#857f5a'], // sand
+  6: ['#555a60','#505558','#4a5055'] // mountain
+};
+
+// Seasonal terrain palettes — indexed [season][terrainType]
+// Only terrain types that shift visually are listed; others fall back to TERRAIN_COLORS.
+// Season 1 (Summer) mirrors TERRAIN_COLORS exactly so game looks unchanged in summer.
+var SEASON_PALETTES = [
+  // 0 — Spring
+  {
+    1: ['#4a7a42','#4d7a45','#426e3a','#4a7040','#487a3e'], // grass: fresh green
+    2: ['#306030','#2d5e2c','#325e30'],                     // forest dark: bright
+    4: ['#608858','#558040','#507848'],                     // forest light / hill: verdant
+  },
+  // 1 — Summer (baseline — matches TERRAIN_COLORS)
+  {
+    1: ['#3a6a35','#3d7038','#35653a','#3a7040','#376a3a'],
+    2: ['#2a5a28','#2d5e2c','#285525'],
+    4: ['#5a7a4a','#558045','#4d7540'],
+  },
+  // 2 — Autumn
+  {
+    1: ['#8a7040','#8a7040','#7a6838','#8a7040','#806838'], // grass: amber
+    2: ['#6a5028','#5a4820','#624820'],                     // forest dark: russet
+    4: ['#a08848','#906830','#987840'],                     // forest light / hill: golden
+  },
+  // 3 — Winter
+  {
+    1: ['#a0b0b8','#98a8b0','#a8b8c0','#98a8b0','#a0b0b8'], // grass: frost grey-blue
+    2: ['#8898a8','#7888a0','#809098'],                     // forest dark: muted grey
+    4: ['#b8c8d0','#a8b8c8','#b0c0c8'],                     // forest light / hill: pale
+  },
+];
+
+function lerpHex(a, b, t) {
+  var ar = parseInt(a.slice(1,3),16), ag = parseInt(a.slice(3,5),16), ab_ = parseInt(a.slice(5,7),16);
+  var br = parseInt(b.slice(1,3),16), bg = parseInt(b.slice(3,5),16), bb_ = parseInt(b.slice(5,7),16);
+  var r = Math.round(ar + (br-ar)*t), g = Math.round(ag + (bg-ag)*t), b2 = Math.round(ab_ + (bb_-ab_)*t);
+  return '#' + r.toString(16).padStart(2,'0') + g.toString(16).padStart(2,'0') + b2.toString(16).padStart(2,'0');
+}
+
+function getSeasonBlend() {
+  var progress = getSeasonProgress();
+  var threshold = 1 - 2 / DAYS_PER_SEASON; // last 2 days of season
+  if (progress > threshold) {
+    var t = (progress - threshold) / (2 / DAYS_PER_SEASON);
+    return { from: getSeason(), to: (getSeason() + 1) % 4, t: t };
+  }
+  return { from: getSeason(), to: getSeason(), t: 0 };
+}
+
+function getSeasonalColors(terrainType) {
+  var blend = getSeasonBlend();
+  var fromPalette = SEASON_PALETTES[blend.from];
+  var toPalette   = SEASON_PALETTES[blend.to];
+  var fromColors = (fromPalette && fromPalette[terrainType]) || TERRAIN_COLORS[terrainType];
+  var toColors   = (toPalette   && toPalette[terrainType])   || TERRAIN_COLORS[terrainType];
+  if (blend.t === 0) return fromColors;
+  return fromColors.map(function(c, i) {
+    return lerpHex(c, toColors[i] || toColors[0], blend.t);
+  });
+}
+
+// Map data
+var terrain = new Uint8Array(MAP_W * MAP_H);
+var minerals = new Uint8Array(MAP_W * MAP_H); // 0=none, 1=iron, 2=coal, 3=gold (on mountain tiles)
+var height = new Float32Array(MAP_W * MAP_H);
+var riverSet = new Set(); // tracks which tiles are river (vs ocean) water
+var buildings = []; // {type, tx, ty, built, progress, working, cooldown, storage:{}}
+var flags = []; // {tx, ty, items:[]} — max 8 items
+var roads = []; // {from:{tx,ty}, to:{tx,ty}}
+var carriers = []; // {x, y, tx, ty, targetTx, targetTy, carrying, road, state, timer}
+var resources = {wood:10, planks:8, stone:8, bread:4, grain:0, flour:0, fish:2, water:0, meat:0, ironore:0, coal:0, goldore:0, iron:0, tools:0, coins:0};
+var floatingTexts = []; // {x, y, text, color, life, maxLife}
+var animals = []; // {tx, ty, type, dir, timer} — wildlife wandering the map
+var seasonParticles = []; // {x, y, vx, vy, r, opacity, type:'snow'|'leaf', angle, spin}
+var _lastNotifiedSeason = -1; // session-only; -1 means "not yet initialised"
+var MINERAL = {NONE:0, IRON:1, COAL:2, GOLD:3};
+var MINERAL_COLORS = {1:'#8a4a30', 2:'#2a2a2a', 3:'#c0a020'};
+
+// ===== POPULATION & HAPPINESS =====
+var population = {capacity: 10, employed: 0, happiness: 50, fed: true, tavernBonus: 0};
+// happiness factors: food (40%), housing (30%), amenities/tavern (15%), wealth/coins (15%)
+
+// ===== DAY/NIGHT CYCLE =====
+var DAY_LENGTH = 14400; // ticks per full day (~4 min at 1x speed)
+
+function getTimeOfDay() {
+  return (tick % DAY_LENGTH) / DAY_LENGTH; // 0=midnight, 0.25=6am, 0.5=noon, 0.75=6pm
+}
+
+// ===== SEASONS =====
+var DAYS_PER_SEASON = 14;
+var SEASON_LENGTH = DAYS_PER_SEASON * DAY_LENGTH; // 201,600 ticks
+var YEAR_LENGTH = 4 * SEASON_LENGTH;              // 806,400 ticks
+
+function getSeason() {
+  return Math.floor((tick % YEAR_LENGTH) / SEASON_LENGTH); // 0=Spring 1=Summer 2=Autumn 3=Winter
+}
+function getSeasonDay() {
+  return Math.floor(((tick % YEAR_LENGTH) % SEASON_LENGTH) / DAY_LENGTH) + 1; // 1–14
+}
+function getSeasonProgress() {
+  return ((tick % YEAR_LENGTH) % SEASON_LENGTH) / SEASON_LENGTH; // 0.0–1.0
+}
+function getSeasonName() {
+  return ['Spring','Summer','Autumn','Winter'][getSeason()];
+}
+
+function getDaylight(t) {
+  if (t === undefined) t = getTimeOfDay();
+  // Smooth daylight curve: 1=full day, 0=full night
+  return Math.max(0, Math.min(1, 0.5 + 0.6 * Math.cos((t - 0.5) * Math.PI * 2)));
+}
+
+function getClockStr(t) {
+  if (t === undefined) t = getTimeOfDay();
+  var hours = Math.floor(t * 24);
+  var mins = Math.floor((t * 24 - hours) * 60);
+  return (hours < 10 ? '0' : '') + hours + ':' + (mins < 10 ? '0' : '') + mins;
+}
+
+function getTimePeriod(t, d) {
+  if (d > 0.8) return 'Day';
+  if (d > 0.4) return t < 0.5 ? 'Dawn' : 'Dusk';
+  if (d > 0.1) return t < 0.5 ? 'Dawn' : 'Twilight';
+  return 'Night';
+}
+
+// Seeded star positions (don't regenerate each frame)
+var _starPositions = null;
+function getStarPositions(count) {
+  if (_starPositions && _starPositions.length === count) return _starPositions;
+  _starPositions = [];
+  for (var i = 0; i < count; i++) {
+    // Use a hash-like spread
+    var sx = ((i * 7919 + 1234) % 2000) / 2000;
+    var sy = ((i * 4211 + 5678) % 1200) / 2000;
+    var brightness = 0.3 + ((i * 3571 + 999) % 1000) / 1000 * 0.7;
+    var size = 0.5 + ((i * 2749) % 3) * 0.4;
+    var twinkleSpeed = 0.015 + ((i * 1301) % 100) / 100 * 0.025;
+    _starPositions.push({sx: sx, sy: sy, brightness: brightness, size: size, twinkleSpeed: twinkleSpeed});
+  }
+  return _starPositions;
+}
+
+function updatePopulation() {
+  // Housing capacity: HQ=10 base + cottages/houses
+  var cap = 10;
+  var tavernCount = 0;
+  for (var i = 0; i < buildings.length; i++) {
+    var b = buildings[i], def = BLDG[b.type];
+    if (b.built && def.housing) cap += def.housing;
+    if (b.built && b.type === 'tavern') tavernCount++;
+  }
+  population.capacity = cap;
+
+  // Employed = number of non-HQ, non-housing working buildings
+  var emp = 0;
+  for (var j = 0; j < buildings.length; j++) {
+    var b2 = buildings[j], def2 = BLDG[b2.type];
+    if (b2.type === 'hq') continue;
+    if (def2.category === 'housing') continue;
+    if (b2.built) emp++;
+  }
+  population.employed = emp;
+
+  // Happiness calculation
+  var totalFood = (resources.bread || 0) + (resources.fish || 0) + (resources.meat || 0);
+  var foodScore = Math.min(100, totalFood * 10); // 10 food = 100%
+  var housingScore = emp === 0 ? 100 : Math.min(100, (cap / Math.max(1, emp)) * 50); // 2:1 ratio = 100%
+  var tavernScore = Math.min(100, tavernCount * 50); // 2 taverns = max
+  population.tavernBonus = tavernScore;
+  var wealthScore = Math.min(100, (resources.coins || 0) * 20); // 5 coins = 100%
+
+  population.happiness = Math.round(foodScore * 0.4 + housingScore * 0.3 + tavernScore * 0.15 + wealthScore * 0.15);
+  population.happiness = Math.max(0, Math.min(100, population.happiness));
+
+  // Seasonal happiness nudge
+  var seasonHappy = [5, 8, 3, 0][getSeason()]; // spring, summer, autumn, winter base
+  if (getSeason() === 3) {
+    // Winter penalty only if food is low
+    var totalFood2 = (resources.bread || 0) + (resources.fish || 0) + (resources.meat || 0);
+    if (totalFood2 < 5) seasonHappy = -10;
+  }
+  population.happiness = Math.max(0, Math.min(100, population.happiness + seasonHappy));
+}
+
+function getHappinessMultiplier() {
+  var h = population.happiness;
+  if (h < 30) return 0.7;
+  if (h > 70) return 1.0 + (h - 70) / 100; // up to 1.3
+  return 1.0;
+}
+
+function getSeasonModifier(buildingType) {
+  var s = getSeason(), day = getSeasonDay();
+  if (s === 3 && buildingType === 'farm') return null; // dormant — sentinel, not a number
+  if (s === 0 && buildingType === 'farm') return 0.8;
+  if (s === 0 && buildingType === 'forester') return 1.2;
+  if (s === 2 && buildingType === 'farm') return day >= 12 ? 1.5 : 1.0;
+  if (s === 2 && buildingType === 'forester') return 0.8;
+  if (s === 3) {
+    if (buildingType === 'woodcutter' || buildingType === 'hunter' || buildingType === 'quarry') return 0.8;
+    if (buildingType === 'forester') return 0.9;
+  }
+  return 1.0;
+}
+
+function getAvailableWorkers() {
+  return Math.max(0, population.capacity - population.employed);
+}
+
+// ===== BUILDING DEFINITIONS =====
+var BLDG = {
+  hq: {name:'Headquarters', cost:{}, size:3, desc:'Starting building. Stores all goods.', color:'#c0a060', produces:null, needs:null, category:'special'},
+  woodcutter: {name:'Woodcutter', cost:{planks:2}, size:1, desc:'Cuts trees → wood. Place near forest!', color:'#8a6a40', produces:'wood', needs:null, category:'gather', interval:200, radius:6},
+  forester: {name:'Forester', cost:{planks:2}, size:1, desc:'Plants trees. Pair with woodcutter.', color:'#4a8a40', produces:null, needs:null, category:'gather', interval:150, radius:5},
+  sawmill: {name:'Sawmill', cost:{planks:2,stone:2}, size:2, desc:'Wood → planks. Essential!', color:'#a08050', produces:'planks', needs:'wood', category:'process', interval:120},
+  quarry: {name:'Quarry', cost:{planks:2}, size:1, desc:'Mines stone from rocky ground.', color:'#808080', produces:'stone', needs:null, category:'gather', interval:180, radius:5},
+  farm: {name:'Farm', cost:{planks:3,stone:1}, size:2, desc:'Grows grain on surrounding land.', color:'#c0a040', produces:'grain', needs:null, category:'gather', interval:250, radius:4},
+  mill: {name:'Mill', cost:{planks:2,stone:2}, size:2, desc:'Grain → flour. Has a windmill!', color:'#b0a070', produces:'flour', needs:'grain', category:'process', interval:100},
+  bakery: {name:'Bakery', cost:{planks:2,stone:2}, size:2, desc:'Flour + water → bread.', color:'#c09050', produces:'bread', needs2:'water', needs:'flour', category:'process', interval:130},
+  fisher: {name:'Fisher', cost:{planks:2}, size:1, desc:'Catches fish. Place near river or coast!', color:'#4a7a9a', produces:'fish', needs:null, category:'gather', interval:160, radius:6, needsTerrain:TERRAIN.WATER},
+  well: {name:'Well', cost:{planks:1,stone:2}, size:1, desc:'Draws water from the ground.', color:'#5a8ab0', produces:'water', needs:null, category:'gather', interval:90},
+  hunter: {name:'Hunter', cost:{planks:2}, size:1, desc:'Hunts in forests for meat.', color:'#7a5a3a', produces:'meat', needs:null, category:'gather', interval:220, radius:8},
+  ironmine: {name:'Iron Mine', cost:{planks:3,stone:2}, size:1, desc:'Mines iron ore. Place on mountains!', color:'#8a5040', produces:'ironore', needs:null, category:'mine', interval:250, radius:4, needsMineral:MINERAL.IRON},
+  coalmine: {name:'Coal Mine', cost:{planks:3,stone:2}, size:1, desc:'Mines coal. Place on mountains!', color:'#404850', produces:'coal', needs:null, category:'mine', interval:220, radius:4, needsMineral:MINERAL.COAL},
+  goldmine: {name:'Gold Mine', cost:{planks:4,stone:3}, size:1, desc:'Mines gold. Place on mountains!', color:'#b09030', produces:'goldore', needs:null, category:'mine', interval:300, radius:4, needsMineral:MINERAL.GOLD},
+  smelter: {name:'Smelter', cost:{planks:3,stone:3}, size:2, desc:'Iron ore + coal → iron bars.', color:'#8a4030', produces:'iron', needs:'ironore', needs2:'coal', category:'process', interval:150},
+  toolmaker: {name:'Toolmaker', cost:{planks:2,stone:2}, size:2, desc:'Iron + planks → tools.', color:'#6a7a60', produces:'tools', needs:'iron', needs2:'planks', category:'process', interval:180},
+  mint: {name:'Mint', cost:{planks:3,stone:3}, size:2, desc:'Gold + coal → coins.', color:'#b0a040', produces:'coins', needs:'goldore', needs2:'coal', category:'process', interval:200},
+  guard: {name:'Guardhouse', cost:{planks:2,stone:3}, size:1, desc:'Expands your territory border.', color:'#8a4040', produces:null, needs:null, category:'military'},
+  cottage: {name:'Cottage', cost:{planks:2}, size:1, desc:'Houses 4 villagers.', color:'#a07850', produces:null, needs:null, category:'housing', housing:4},
+  house: {name:'House', cost:{planks:3,stone:2}, size:2, desc:'Houses 8 villagers. Sturdy!', color:'#b08860', produces:null, needs:null, category:'housing', housing:8},
+  tavern: {name:'Tavern', cost:{planks:3,stone:1}, size:1, desc:'Serves bread → boosts morale.', color:'#9a6a50', produces:null, needs:'bread', category:'housing', interval:400},
+};
+
+// ===== MAP GENERATION =====
+function generateMap() {
+  // Simple noise-based terrain
+  // Use value noise with octaves
+  var seed = Math.random() * 10000;
+  function noise2d(x, y) {
+    var n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453;
+    return n - Math.floor(n);
+  }
+  function smoothNoise(x, y, scale) {
+    var sx = x / scale, sy = y / scale;
+    var ix = Math.floor(sx), iy = Math.floor(sy);
+    var fx = sx - ix, fy = sy - iy;
+    fx = fx * fx * (3 - 2 * fx);
+    fy = fy * fy * (3 - 2 * fy);
+    var a = noise2d(ix, iy), b = noise2d(ix+1, iy);
+    var c = noise2d(ix, iy+1), d = noise2d(ix+1, iy+1);
+    return a*(1-fx)*(1-fy) + b*fx*(1-fy) + c*(1-fx)*fy + d*fx*fy;
+  }
+  function fbm(x, y) {
+    return smoothNoise(x, y, 12) * 0.5 + smoothNoise(x, y, 6) * 0.3 + smoothNoise(x, y, 3) * 0.2;
+  }
+
+  for (var y = 0; y < MAP_H; y++) {
+    for (var x = 0; x < MAP_W; x++) {
+      var i = y * MAP_W + x;
+      var h = fbm(x, y);
+      height[i] = h;
+
+      // Edge fade to water
+      var dx = x / MAP_W - 0.5, dy = y / MAP_H - 0.5;
+      var edgeDist = 1 - Math.max(Math.abs(dx), Math.abs(dy)) * 2.5;
+      edgeDist = Math.max(0, Math.min(1, edgeDist));
+      h *= edgeDist;
+      height[i] = h;
+
+      if (h < 0.18) terrain[i] = TERRAIN.WATER;
+      else if (h < 0.22) terrain[i] = TERRAIN.SAND;
+      else if (h < 0.55) {
+        var forestNoise = smoothNoise(x, y, 4);
+        if (forestNoise > 0.55) terrain[i] = TERRAIN.FOREST;
+        else terrain[i] = TERRAIN.GRASS;
+      } else if (h < 0.7) {
+        var stoneNoise = smoothNoise(x, y, 5);
+        if (stoneNoise > 0.5) terrain[i] = TERRAIN.STONE;
+        else terrain[i] = TERRAIN.HILL;
+      } else {
+        terrain[i] = TERRAIN.MOUNTAIN;
+      }
+    }
+  }
+
+  // === RIVER GENERATION ===
+  // Carve a meandering river across the map from one side to the other
+  // Strategy: pick two points on opposite edges, trace a noisy path between them
+  // staying inland and avoiding the center HQ area
+  var riverPath = [];
+  riverSet.clear();
+  (function generateRiver() {
+    // Pick start and end on opposite sides — well inside the land area
+    // Edge water extends ~12 tiles in, so start/end at 18-25% from edge
+    var side = noise2d(seed + 99, seed + 77) > 0.5 ? 0 : 1; // 0=top-bottom, 1=left-right
+    var startX, startY, endX, endY;
+    if (side === 0) {
+      // Top to bottom
+      startX = Math.floor(MAP_W * 0.3 + noise2d(seed + 200, 1) * MAP_W * 0.4);
+      startY = Math.floor(MAP_H * 0.18 + noise2d(seed + 201, 2) * MAP_H * 0.07);
+      endX = Math.floor(MAP_W * 0.3 + noise2d(seed + 202, 3) * MAP_W * 0.4);
+      endY = Math.floor(MAP_H * 0.75 + noise2d(seed + 203, 4) * MAP_H * 0.07);
+    } else {
+      // Left to right
+      startX = Math.floor(MAP_W * 0.18 + noise2d(seed + 204, 1) * MAP_W * 0.07);
+      startY = Math.floor(MAP_H * 0.3 + noise2d(seed + 205, 2) * MAP_H * 0.4);
+      endX = Math.floor(MAP_W * 0.75 + noise2d(seed + 206, 3) * MAP_W * 0.07);
+      endY = Math.floor(MAP_H * 0.3 + noise2d(seed + 207, 4) * MAP_H * 0.4);
+    }
+
+    // Walk from start toward end with gentle noise-based meandering
+    var rx = startX, ry = startY;
+    var maxSteps = MAP_W * 2;
+    var visited = {};
+    for (var step = 0; step < maxSteps; step++) {
+      var irx = Math.round(rx), iry = Math.round(ry);
+      if (irx < 1 || irx >= MAP_W - 1 || iry < 1 || iry >= MAP_H - 1) break;
+
+      var key = irx + ',' + iry;
+      if (!visited[key]) {
+        visited[key] = true;
+        // Skip HQ area (center ± 6)
+        var dcx = irx - MAP_W / 2, dcy = iry - MAP_H / 2;
+        var distCenter = Math.sqrt(dcx * dcx + dcy * dcy);
+        if (distCenter > 6) {
+          riverPath.push({x: irx, y: iry});
+          terrain[iry * MAP_W + irx] = TERRAIN.WATER;
+          height[iry * MAP_W + irx] = 0.12;
+          riverSet.add(iry * MAP_W + irx);
+        }
+      }
+
+      // Direction toward target + gentle noise meander
+      var dx = endX - rx, dy = endY - ry;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 2) break; // reached end
+
+      // Normalize target direction
+      var tdx = dx / dist, tdy = dy / dist;
+      // Noise-based perpendicular displacement for natural meandering
+      var meander = (smoothNoise(step * 0.12 + 50, seed * 0.1, 4) - 0.5) * 2.0;
+      // Add slower-frequency wobble for broader curves
+      meander += (smoothNoise(step * 0.04 + 200, seed * 0.2, 6) - 0.5) * 1.5;
+      // Perpendicular to flow
+      var pdx = -tdy * meander, pdy = tdx * meander;
+
+      // If approaching HQ, push away from center
+      var dcx2 = rx - MAP_W / 2, dcy2 = ry - MAP_H / 2;
+      var distCenter2 = Math.sqrt(dcx2 * dcx2 + dcy2 * dcy2);
+      if (distCenter2 < 10) {
+        var pushStr = (10 - distCenter2) * 0.2;
+        pdx += (dcx2 / distCenter2) * pushStr;
+        pdy += (dcy2 / distCenter2) * pushStr;
+      }
+
+      rx += tdx * 0.7 + pdx * 0.4;
+      ry += tdy * 0.7 + pdy * 0.4;
+    }
+
+    // Add sand banks along river
+    for (var pi = 0; pi < riverPath.length; pi++) {
+      var pt = riverPath[pi];
+      for (var bdy = -1; bdy <= 1; bdy++) {
+        for (var bdx = -1; bdx <= 1; bdx++) {
+          if (bdx === 0 && bdy === 0) continue;
+          var bx = pt.x + bdx, by = pt.y + bdy;
+          if (bx >= 0 && bx < MAP_W && by >= 0 && by < MAP_H) {
+            var bIdx = by * MAP_W + bx;
+            if (terrain[bIdx] !== TERRAIN.WATER && terrain[bIdx] !== TERRAIN.MOUNTAIN) {
+              if (noise2d(bx + 500, by + 500) > 0.6) {
+                terrain[bIdx] = TERRAIN.SAND;
+              }
+            }
+          }
+        }
+      }
+    }
+  })();
+
+  // Place HQ near center on grass
+  var cx = Math.floor(MAP_W / 2), cy = Math.floor(MAP_H / 2);
+  // Clear area around HQ
+  for (var dy = -3; dy <= 3; dy++) {
+    for (var dx = -3; dx <= 3; dx++) {
+      var tx = cx + dx, ty = cy + dy;
+      if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H) {
+        terrain[ty * MAP_W + tx] = TERRAIN.GRASS;
+        height[ty * MAP_W + tx] = 0.35;
+      }
+    }
+  }
+
+  // Guarantee stone deposits near HQ (2-3 clusters within building range)
+  var stoneCount = 0;
+  for (var dy2 = -10; dy2 <= 10; dy2++) {
+    for (var dx2 = -10; dx2 <= 10; dx2++) {
+      var sx = cx + dx2, sy = cy + dy2;
+      if (sx >= 0 && sx < MAP_W && sy >= 0 && sy < MAP_H) {
+        if (terrain[sy * MAP_W + sx] === TERRAIN.STONE) stoneCount++;
+      }
+    }
+  }
+  if (stoneCount < 15) {
+    // Place stone clusters — generous deposits so stone isn't the bottleneck
+    var stoneSpots = [
+      {dx: 6 + Math.floor(noise2d(seed, 1) * 3), dy: -4 - Math.floor(noise2d(seed, 2) * 3)},
+      {dx: -5 - Math.floor(noise2d(seed, 3) * 3), dy: 5 + Math.floor(noise2d(seed, 4) * 3)},
+      {dx: 7 + Math.floor(noise2d(seed, 5) * 2), dy: 6 + Math.floor(noise2d(seed, 6) * 2)},
+      {dx: -8 - Math.floor(noise2d(seed, 7) * 2), dy: -2 + Math.floor(noise2d(seed, 8) * 4)},
+      {dx: 3 + Math.floor(noise2d(seed, 9) * 3), dy: 8 + Math.floor(noise2d(seed, 10) * 2)}
+    ];
+    for (var si = 0; si < stoneSpots.length; si++) {
+      var spot = stoneSpots[si];
+      for (var sdy = -2; sdy <= 2; sdy++) {
+        for (var sdx = -2; sdx <= 2; sdx++) {
+          if (Math.abs(sdx) + Math.abs(sdy) > 3) continue; // diamond shape
+          var stx = cx + spot.dx + sdx, sty = cy + spot.dy + sdy;
+          if (stx >= 0 && stx < MAP_W && sty >= 0 && sty < MAP_H) {
+            var sti = sty * MAP_W + stx;
+            if (terrain[sti] !== TERRAIN.WATER && terrain[sti] !== TERRAIN.MOUNTAIN) {
+              terrain[sti] = TERRAIN.STONE;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Place mineral deposits on mountain tiles
+  minerals.fill(0);
+  for (var mi = 0; mi < MAP_W * MAP_H; mi++) {
+    if (terrain[mi] === TERRAIN.MOUNTAIN) {
+      var mx2 = mi % MAP_W, my2 = Math.floor(mi / MAP_W);
+      var mNoise = smoothNoise(mx2 + 100, my2 + 100, 5);
+      if (mNoise > 0.45) {
+        // Cluster minerals by region
+        var mType = smoothNoise(mx2 + 200, my2 + 200, 8);
+        if (mType < 0.4) minerals[mi] = MINERAL.IRON;
+        else if (mType < 0.75) minerals[mi] = MINERAL.COAL;
+        else minerals[mi] = MINERAL.GOLD;
+      }
+    }
+  }
+
+  // Guarantee mountain clusters with minerals (reachable but not too close to HQ)
+  var mtCount = 0;
+  for (var mci = 0; mci < MAP_W * MAP_H; mci++) {
+    if (terrain[mci] === TERRAIN.MOUNTAIN) mtCount++;
+  }
+  if (mtCount < 20) {
+    // Place 2-3 mountain clusters at medium distance from HQ
+    var mtSpots = [
+      {dx: 14 + Math.floor(noise2d(seed + 50, 1) * 4), dy: -11 - Math.floor(noise2d(seed + 51, 2) * 4)},
+      {dx: -13 - Math.floor(noise2d(seed + 52, 3) * 4), dy: 13 + Math.floor(noise2d(seed + 53, 4) * 4)},
+      {dx: 13 + Math.floor(noise2d(seed + 54, 5) * 4), dy: 13 + Math.floor(noise2d(seed + 55, 6) * 4)},
+      {dx: -14 - Math.floor(noise2d(seed + 56, 7) * 4), dy: -9 - Math.floor(noise2d(seed + 57, 8) * 4)}
+    ];
+    var mineralTypes = [MINERAL.IRON, MINERAL.COAL, MINERAL.GOLD];
+    for (var msi = 0; msi < mtSpots.length; msi++) {
+      var ms = mtSpots[msi];
+      var mcx = cx + ms.dx, mcy = cy + ms.dy;
+      // Clamp to map bounds
+      mcx = Math.max(3, Math.min(MAP_W - 4, mcx));
+      mcy = Math.max(3, Math.min(MAP_H - 4, mcy));
+      for (var mdy = -3; mdy <= 3; mdy++) {
+        for (var mdx = -3; mdx <= 3; mdx++) {
+          if (Math.abs(mdx) + Math.abs(mdy) > 4) continue;
+          var mtx = mcx + mdx, mty = mcy + mdy;
+          if (mtx >= 0 && mtx < MAP_W && mty >= 0 && mty < MAP_H) {
+            var mti = mty * MAP_W + mtx;
+            if (terrain[mti] !== TERRAIN.WATER) {
+              terrain[mti] = TERRAIN.MOUNTAIN;
+              height[mti] = 0.75;
+              // Each cluster has a primary mineral type, with some coal mixed in
+              if (Math.random() < 0.6) {
+                minerals[mti] = mineralTypes[msi];
+              } else if (Math.random() < 0.5) {
+                minerals[mti] = MINERAL.COAL; // coal in every cluster (needed for smelting)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Guarantee forest near HQ
+  var forestCount = 0;
+  for (var dy3 = -8; dy3 <= 8; dy3++) {
+    for (var dx3 = -8; dx3 <= 8; dx3++) {
+      var fx2 = cx + dx3, fy2 = cy + dy3;
+      if (fx2 >= 0 && fx2 < MAP_W && fy2 >= 0 && fy2 < MAP_H) {
+        if (terrain[fy2 * MAP_W + fx2] === TERRAIN.FOREST) forestCount++;
+      }
+    }
+  }
+  if (forestCount < 12) {
+    // Add forest patches
+    for (var fi = 0; fi < 20; fi++) {
+      var ftx = cx + Math.floor(noise2d(seed + fi, 10) * 12) - 6;
+      var fty = cy + Math.floor(noise2d(seed + fi, 11) * 12) - 6;
+      if (ftx >= 0 && ftx < MAP_W && fty >= 0 && fty < MAP_H && Math.abs(ftx - cx) > 3 && Math.abs(fty - cy) > 3) {
+        var fti = fty * MAP_W + ftx;
+        if (terrain[fti] === TERRAIN.GRASS) terrain[fti] = TERRAIN.FOREST;
+      }
+    }
+  }
+
+  // Spawn wildlife in forests
+  animals = [];
+  for (var ai = 0; ai < MAP_W * MAP_H; ai++) {
+    if (terrain[ai] === TERRAIN.FOREST && Math.random() < 0.008) {
+      var ax = ai % MAP_W, ay = Math.floor(ai / MAP_W);
+      animals.push({tx: ax, ty: ay, type: Math.random() < 0.6 ? 'deer' : 'rabbit', dir: Math.floor(Math.random() * 4), timer: Math.floor(Math.random() * 200), phase: Math.random() * Math.PI * 2});
+    }
+  }
+
+  // Place HQ
+  var hq = createBuilding('hq', cx, cy);
+  hq.built = true;
+  hq.progress = 1;
+  buildings.push(hq);
+
+  // Place initial flag at HQ (size 3, so flag at ty + 3)
+  flags.push({tx: cx, ty: cy + 3, items: []});
+
+  // Center camera on HQ
+  var iso = tileToIso(cx, cy);
+  cam.x = -iso.x + canvas.width / 2;
+  cam.y = -iso.y + canvas.height / 2;
+}
+
+function createBuilding(type, tx, ty) {
+  var def = BLDG[type];
+  var matNeeded = {};
+  for (var r in def.cost) matNeeded[r] = def.cost[r];
+  return {
+    type: type,
+    tx: tx, ty: ty,
+    built: false,
+    progress: 0, // 0 to 1
+    materialsNeeded: matNeeded, // what still needs delivering
+    materialsTotal: JSON.parse(JSON.stringify(def.cost)), // original cost
+    working: false,
+    cooldown: 0,
+    storage: {},
+    workerOut: false // for gatherers — worker is out collecting
+  };
+}
+
+// ===== COORDINATE TRANSFORMS =====
+function tileToIso(tx, ty) {
+  return {
+    x: (tx - ty) * (TW / 2),
+    y: (tx + ty) * (TH / 2)
+  };
+}
+
+function screenToTile(sx, sy) {
+  // Reverse iso transform
+  var wx = (sx - cam.x) / cam.zoom;
+  var wy = (sy - cam.y) / cam.zoom;
+  var tx = (wx / (TW / 2) + wy / (TH / 2)) / 2;
+  var ty = (wy / (TH / 2) - wx / (TW / 2)) / 2;
+  return {tx: Math.floor(tx), ty: Math.floor(ty)};
+}
+
+function worldToScreen(wx, wy) {
+  return {
+    x: wx * cam.zoom + cam.x,
+    y: wy * cam.zoom + cam.y
+  };
+}
+
+// ===== RENDERING =====
+function resize() {
+  canvas.width = window.innerWidth - 220;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function getTerrainColor(t, tx, ty) {
+  var colors = getSeasonalColors(t);
+  var idx = ((tx * 7 + ty * 13) & 0x7fffffff) % colors.length;
+  return colors[idx];
+}
+
+function drawTile(tx, ty) {
+  if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return;
+  var i = ty * MAP_W + tx;
+  var t = terrain[i];
+  var iso = tileToIso(tx, ty);
+  var s = worldToScreen(iso.x, iso.y);
+
+  var hw = TW / 2 * cam.zoom;
+  var hh = TH / 2 * cam.zoom;
+
+  // Cull off-screen tiles
+  if (s.x + hw < 0 || s.x - hw > canvas.width || s.y + hh < 0 || s.y - hh * 3 > canvas.height) return;
+
+  // Draw diamond
+  ctx.beginPath();
+  ctx.moveTo(s.x, s.y - hh);
+  ctx.lineTo(s.x + hw, s.y);
+  ctx.lineTo(s.x, s.y + hh);
+  ctx.lineTo(s.x - hw, s.y);
+  ctx.closePath();
+
+  if (t === TERRAIN.WATER) {
+    // Animated water — river water is lighter/greener than ocean
+    var isRiver = riverSet.has(ty * MAP_W + tx);
+    var wave = Math.sin(tick * 0.03 + tx * 0.5 + ty * 0.7) * 0.1;
+    var flowWave = isRiver ? Math.sin(tick * 0.05 + tx * 0.8 - ty * 0.3) * 0.08 : 0;
+    var r = (isRiver ? 0x30 : 0x2a) + Math.floor(wave * 20);
+    var g = (isRiver ? 0x5a : 0x4a) + Math.floor((wave + flowWave) * 18);
+    var b = (isRiver ? 0x70 : 0x6a) + Math.floor(Math.sin(tick * 0.02 + tx * 0.3) * 25);
+    ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+  } else {
+    ctx.fillStyle = getTerrainColor(t, tx, ty);
+  }
+  ctx.fill();
+
+  // Subtle grid
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+
+  // Sand/grass edge highlight
+  if (t === TERRAIN.SAND) {
+    ctx.strokeStyle = 'rgba(180,170,120,0.15)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Territory tint and border
+  if (t !== TERRAIN.WATER) {
+    var inT = isInTerritory(tx, ty);
+    if (inT) {
+      ctx.fillStyle = 'rgba(80,120,200,0.06)';
+      ctx.fill();
+      // Border edge — check if any neighbor is outside territory
+      var isBorder = false;
+      if (tx > 0 && !isInTerritory(tx-1, ty)) isBorder = true;
+      if (tx < MAP_W-1 && !isInTerritory(tx+1, ty)) isBorder = true;
+      if (ty > 0 && !isInTerritory(tx, ty-1)) isBorder = true;
+      if (ty < MAP_H-1 && !isInTerritory(tx, ty+1)) isBorder = true;
+      if (isBorder) {
+        ctx.strokeStyle = 'rgba(100,140,220,0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function drawTree(tx, ty) {
+  var iso = tileToIso(tx, ty);
+  var s = worldToScreen(iso.x, iso.y);
+  var z = cam.zoom;
+  var hash = ((tx * 31 + ty * 17) & 0x7fffffff);
+
+  // Gentle sway
+  var sway = Math.sin(tick * 0.008 + hash * 0.7) * 1.5 * z;
+
+  // Trunk
+  ctx.fillStyle = '#5a4030';
+  ctx.fillRect(s.x - 1.5 * z, s.y - 12 * z, 3 * z, 12 * z);
+
+  // Canopy - seasonal colours
+  var variant = hash % 3;
+  var seasonalForest = getSeasonalColors(TERRAIN.FOREST);
+  var green = seasonalForest[variant % seasonalForest.length];
+  // Derive a slightly darker shadow colour by blending toward black
+  var darkGreen = lerpHex(green, '#0a0a0a', 0.25);
+  var sz = (6 + hash % 4) * z;
+
+  ctx.beginPath();
+  ctx.arc(s.x + sway, s.y - 14 * z, sz, 0, Math.PI * 2);
+  ctx.fillStyle = green;
+  ctx.fill();
+
+  // Shadow side
+  ctx.beginPath();
+  ctx.arc(s.x + sway + 1 * z, s.y - 13 * z, sz * 0.7, 0, Math.PI * 2);
+  ctx.fillStyle = darkGreen;
+  ctx.fill();
+
+  // Winter snow cap — fades in over first 2 days of winter, out over last 2
+  var snowAlpha = 0;
+  var s2 = getSeason();
+  var sp = getSeasonProgress();
+  if (s2 === 3) { // Winter
+    snowAlpha = sp < (2/DAYS_PER_SEASON) ? sp / (2/DAYS_PER_SEASON) : (sp > (1 - 2/DAYS_PER_SEASON) ? (1 - sp) / (2/DAYS_PER_SEASON) : 1);
+  }
+  if (snowAlpha > 0) {
+    ctx.beginPath();
+    ctx.ellipse(s.x + sway, s.y - 16 * z, sz * 0.8, sz * 0.4, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(220,235,245,' + (snowAlpha * 0.75).toFixed(2) + ')';
+    ctx.fill();
+  }
+}
+
+function drawStone(tx, ty) {
+  var iso = tileToIso(tx, ty);
+  var s = worldToScreen(iso.x, iso.y);
+  var z = cam.zoom;
+  var hash = ((tx * 23 + ty * 41) & 0x7fffffff);
+
+  var colors = ['#707575','#808585','#606868'];
+  ctx.fillStyle = colors[hash % 3];
+
+  // Rock cluster
+  for (var r = 0; r < 2 + hash % 2; r++) {
+    var ox = (hash * (r + 1) % 7 - 3) * z;
+    var oy = (hash * (r + 2) % 5 - 2) * z;
+    var rw = (4 + hash % 4) * z;
+    var rh = (3 + hash % 3) * z;
+    ctx.beginPath();
+    ctx.ellipse(s.x + ox, s.y - 2 * z + oy, rw, rh, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawMineral(tx, ty) {
+  var mi = ty * MAP_W + tx;
+  var m = minerals[mi];
+  if (m === MINERAL.NONE) return;
+  var iso = tileToIso(tx, ty);
+  var s = worldToScreen(iso.x, iso.y);
+  var z = cam.zoom;
+  if (z < 0.4) return;
+  var hash = ((tx * 29 + ty * 43) & 0x7fffffff);
+  var color = MINERAL_COLORS[m];
+  // Draw 3-5 mineral specks on the mountain tile
+  var count = 3 + hash % 3;
+  for (var si2 = 0; si2 < count; si2++) {
+    var ox = ((hash * (si2 + 1) * 7) % 13 - 6) * z;
+    var oy = ((hash * (si2 + 2) * 11) % 9 - 4) * z * 0.5;
+    var r2 = (1.5 + (hash * si2) % 2) * z;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.arc(s.x + ox, s.y + oy, r2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Subtle glow for gold
+  if (m === MINERAL.GOLD && z > 0.6) {
+    var glow = 0.1 + Math.sin(tick * 0.04 + hash) * 0.05;
+    ctx.fillStyle = 'rgba(210,180,40,' + glow + ')';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 5 * z, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawBuilding(b) {
+  var def = BLDG[b.type];
+  var iso = tileToIso(b.tx, b.ty);
+  var s = worldToScreen(iso.x, iso.y);
+  var z = cam.zoom;
+  var sz = def.size;
+
+  // Building body
+  var bw = (12 + sz * 6) * z;
+  var bh = (10 + sz * 5) * z;
+
+  if (!b.built) {
+    // Under construction — scaffold frame
+    ctx.globalAlpha = 0.3 + b.progress * 0.7;
+    // Draw scaffold poles
+    ctx.strokeStyle = '#8a7050';
+    ctx.lineWidth = 1 * z;
+    ctx.beginPath();
+    ctx.moveTo(s.x - bw/2, s.y); ctx.lineTo(s.x - bw/2, s.y - bh - 4*z);
+    ctx.moveTo(s.x + bw/2, s.y); ctx.lineTo(s.x + bw/2, s.y - bh - 4*z);
+    ctx.moveTo(s.x - bw/2, s.y - bh/2); ctx.lineTo(s.x + bw/2, s.y - bh/2);
+    ctx.stroke();
+  }
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(s.x, s.y + 2 * z, bw * 0.8, bh * 0.3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Base/walls
+  var baseColor = def.color;
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(s.x - bw / 2, s.y - bh, bw, bh);
+
+  // Darker side wall
+  ctx.fillStyle = shadeColor(baseColor, -25);
+  ctx.fillRect(s.x + bw / 2 - 3 * z, s.y - bh, 3 * z, bh);
+
+  // Roof
+  ctx.beginPath();
+  ctx.moveTo(s.x - bw / 2 - 2 * z, s.y - bh);
+  ctx.lineTo(s.x, s.y - bh - 8 * z);
+  ctx.lineTo(s.x + bw / 2 + 2 * z, s.y - bh);
+  ctx.closePath();
+  ctx.fillStyle = b.type === 'hq' ? '#8a3030' : (b.type === 'cottage' || b.type === 'house') ? '#6a5030' : b.type === 'tavern' ? '#8a5020' : '#7a4020';
+  ctx.fill();
+
+  // Door
+  ctx.fillStyle = '#3a2a1a';
+  ctx.fillRect(s.x - 2 * z, s.y - 5 * z, 4 * z, 5 * z);
+
+  // Type-specific details
+  if (b.type === 'sawmill' && b.built) {
+    // Sawblade
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 1.5 * z;
+    ctx.beginPath();
+    ctx.arc(s.x + bw/3, s.y - bh/2, 3 * z, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (b.type === 'mill' && b.built) {
+    // Windmill sails
+    var angle = tick * 0.03;
+    ctx.strokeStyle = '#c0b080';
+    ctx.lineWidth = 1.5 * z;
+    for (var sa = 0; sa < 4; sa++) {
+      var a = angle + sa * Math.PI / 2;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y - bh - 5 * z);
+      ctx.lineTo(s.x + Math.cos(a) * 10 * z, s.y - bh - 5 * z + Math.sin(a) * 10 * z);
+      ctx.stroke();
+    }
+  } else if (b.type === 'well' && b.built) {
+    // Well bucket
+    ctx.fillStyle = '#5a4030';
+    ctx.fillRect(s.x - 1 * z, s.y - bh - 6 * z, 2 * z, 6 * z);
+    ctx.fillRect(s.x - 4 * z, s.y - bh - 7 * z, 8 * z, 1.5 * z);
+  } else if (b.type === 'farm' && b.built) {
+    // Grain field patches around building
+    ctx.fillStyle = 'rgba(200,180,60,0.3)';
+    for (var fi = 0; fi < 3; fi++) {
+      var fx2 = s.x + (fi - 1) * 8 * z;
+      var fy2 = s.y + 3 * z;
+      ctx.fillRect(fx2 - 3 * z, fy2, 6 * z, 3 * z);
+    }
+  }
+
+  // Mine-specific details
+  if ((b.type === 'ironmine' || b.type === 'coalmine' || b.type === 'goldmine') && b.built) {
+    // Mine entrance (dark arch)
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y - 2 * z, 3.5 * z, Math.PI, 0);
+    ctx.fill();
+    ctx.fillRect(s.x - 3.5 * z, s.y - 2 * z, 7 * z, 2 * z);
+    // Timber supports
+    ctx.strokeStyle = '#6a5030';
+    ctx.lineWidth = 1.2 * z;
+    ctx.beginPath();
+    ctx.moveTo(s.x - 3.5 * z, s.y); ctx.lineTo(s.x - 3.5 * z, s.y - 5 * z);
+    ctx.moveTo(s.x + 3.5 * z, s.y); ctx.lineTo(s.x + 3.5 * z, s.y - 5 * z);
+    ctx.moveTo(s.x - 4 * z, s.y - 5 * z); ctx.lineTo(s.x + 4 * z, s.y - 5 * z);
+    ctx.stroke();
+    // Ore cart indicator
+    var oreColor = b.type === 'ironmine' ? '#8a4a30' : b.type === 'coalmine' ? '#2a2a2a' : '#c0a020';
+    ctx.fillStyle = oreColor;
+    ctx.fillRect(s.x - 5 * z, s.y - 1.5 * z, 3 * z, 1.5 * z);
+  } else if (b.type === 'smelter' && b.built) {
+    // Furnace glow
+    var glow2 = b.working ? 0.6 + Math.sin(tick * 0.08) * 0.2 : 0.15;
+    ctx.fillStyle = 'rgba(200,80,20,' + glow2 + ')';
+    ctx.beginPath();
+    ctx.arc(s.x - 2 * z, s.y - bh * 0.4, 3 * z, 0, Math.PI * 2);
+    ctx.fill();
+    // Chimney
+    ctx.fillStyle = '#555';
+    ctx.fillRect(s.x + bw/3, s.y - bh - 10 * z, 3 * z, 10 * z);
+  } else if (b.type === 'toolmaker' && b.built) {
+    // Anvil shape
+    ctx.fillStyle = '#555';
+    ctx.fillRect(s.x + bw/4, s.y - 4 * z, 4 * z, 2 * z);
+    ctx.fillRect(s.x + bw/4 + 1 * z, s.y - 6 * z, 2 * z, 2 * z);
+  } else if (b.type === 'mint' && b.built) {
+    // Coin symbol
+    ctx.fillStyle = '#d0b030';
+    ctx.beginPath();
+    ctx.arc(s.x + bw/4, s.y - bh * 0.5, 2.5 * z, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#b09020';
+    ctx.beginPath();
+    ctx.arc(s.x + bw/4, s.y - bh * 0.5, 1.5 * z, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (b.type === 'cottage' && b.built) {
+    // Cozy window
+    var d = getDaylight();
+    ctx.fillStyle = d < 0.5 ? 'rgba(200,160,60,' + (0.6 - d * 0.8) + ')' : 'rgba(120,160,200,0.3)';
+    ctx.fillRect(s.x - 4 * z, s.y - bh + 3 * z, 3 * z, 3 * z);
+    ctx.fillRect(s.x + 1 * z, s.y - bh + 3 * z, 3 * z, 3 * z);
+    // Flower box
+    ctx.fillStyle = '#6a9040';
+    ctx.fillRect(s.x - 5 * z, s.y - bh + 6.5 * z, 10 * z, 1 * z);
+    // Tiny villagers near house
+    if (z > 0.5) {
+      var seed = b.tx * 7 + b.ty * 13;
+      for (var vi = 0; vi < 2; vi++) {
+        var vx = s.x + ((seed + vi * 37) % 20 - 10) * z;
+        var vy = s.y + (2 + ((seed + vi * 19) % 4)) * z;
+        var vphase = Math.sin(tick * 0.02 + vi * 2 + seed) * 1.5 * z;
+        ctx.fillStyle = ['#6a8a50','#5a7ac0','#a06a50','#8a6a90'][vi % 4];
+        ctx.beginPath();
+        ctx.arc(vx + vphase, vy, 1.2 * z, 0, Math.PI * 2); // body
+        ctx.fill();
+        ctx.fillStyle = '#d0b090';
+        ctx.beginPath();
+        ctx.arc(vx + vphase, vy - 1.8 * z, 0.8 * z, 0, Math.PI * 2); // head
+        ctx.fill();
+      }
+    }
+  } else if (b.type === 'house' && b.built) {
+    // Bigger windows (2 floors)
+    var d2 = getDaylight();
+    var winColor = d2 < 0.5 ? 'rgba(200,160,60,' + (0.6 - d2 * 0.8) + ')' : 'rgba(120,160,200,0.3)';
+    ctx.fillStyle = winColor;
+    // Lower windows
+    ctx.fillRect(s.x - bw/3, s.y - bh + bh * 0.6, 3 * z, 3 * z);
+    ctx.fillRect(s.x + bw/3 - 3 * z, s.y - bh + bh * 0.6, 3 * z, 3 * z);
+    // Upper windows
+    ctx.fillRect(s.x - bw/3, s.y - bh + bh * 0.25, 3 * z, 3 * z);
+    ctx.fillRect(s.x + bw/3 - 3 * z, s.y - bh + bh * 0.25, 3 * z, 3 * z);
+    // Tiny villagers
+    if (z > 0.5) {
+      var seed2 = b.tx * 11 + b.ty * 17;
+      for (var vi2 = 0; vi2 < 3; vi2++) {
+        var vx2 = s.x + ((seed2 + vi2 * 41) % 24 - 12) * z;
+        var vy2 = s.y + (2 + ((seed2 + vi2 * 23) % 5)) * z;
+        var vp2 = Math.sin(tick * 0.02 + vi2 * 1.7 + seed2) * 2 * z;
+        ctx.fillStyle = ['#6a8a50','#5a7ac0','#a06a50','#8a6a90','#c08060'][vi2 % 5];
+        ctx.beginPath();
+        ctx.arc(vx2 + vp2, vy2, 1.2 * z, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#d0b090';
+        ctx.beginPath();
+        ctx.arc(vx2 + vp2, vy2 - 1.8 * z, 0.8 * z, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  } else if (b.type === 'tavern' && b.built) {
+    // Tavern sign
+    ctx.fillStyle = '#6a4020';
+    ctx.fillRect(s.x + bw/3, s.y - bh - 2 * z, 1.5 * z, 6 * z);
+    ctx.fillStyle = '#c0a040';
+    ctx.fillRect(s.x + bw/3 - 2 * z, s.y - bh - 4 * z, 6 * z, 4 * z);
+    // Mug icon
+    ctx.fillStyle = '#8a6a30';
+    ctx.fillRect(s.x + bw/3 - 0.5 * z, s.y - bh - 3 * z, 2.5 * z, 2 * z);
+    // Warm glow from door
+    if (b.working) {
+      ctx.fillStyle = 'rgba(200,160,60,0.25)';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 4 * z, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Working indicator — smoke from chimney
+  if (b.built && b.working && b.type !== 'mill' && b.type !== 'farm') {
+    var t = tick * 0.05;
+    var smokeCount = b.type === 'smelter' ? 5 : 3;
+    var smokeColor = b.type === 'smelter' ? '#666' : '#aaa';
+    for (var p = 0; p < smokeCount; p++) {
+      var py = s.y - bh - 8 * z - (p * 5 + t % 15) * z;
+      var px = (b.type === 'smelter' ? s.x + bw/3 + 1.5 * z : s.x + 4 * z) + Math.sin(t + p) * 2 * z;
+      var pr = (2 + p * 0.5) * z;
+      ctx.globalAlpha = 0.35 - p * 0.06;
+      ctx.fillStyle = smokeColor;
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.globalAlpha = 1;
+
+  // Construction progress bar + material indicators
+  if (!b.built) {
+    // Calculate material delivery progress
+    var totalMats = 0, deliveredMats = 0;
+    for (var mr in b.materialsTotal) {
+      totalMats += b.materialsTotal[mr];
+      deliveredMats += b.materialsTotal[mr] - (b.materialsNeeded[mr] || 0);
+    }
+    var matProgress = totalMats > 0 ? deliveredMats / totalMats : 1;
+    // Show combined progress: materials (80%) + construction (20%)
+    var totalProgress = matProgress * 0.8 + b.progress * 0.2;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(s.x - 12 * z, s.y - bh - 14 * z, 24 * z, 3 * z);
+    ctx.fillStyle = matProgress < 1 ? '#c0a060' : '#4a90d0';
+    ctx.fillRect(s.x - 12 * z, s.y - bh - 14 * z, 24 * z * totalProgress, 3 * z);
+    // Show what's still needed
+    if (matProgress < 1 && z > 0.6) {
+      var needStr = '';
+      for (var mr2 in b.materialsNeeded) {
+        if (b.materialsNeeded[mr2] > 0) needStr += (needStr ? ' ' : '') + b.materialsNeeded[mr2] + mr2.charAt(0).toUpperCase();
+      }
+      if (needStr) {
+        ctx.fillStyle = '#c0a060';
+        ctx.font = Math.max(7, 8 * z) + 'px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('Need: ' + needStr, s.x, s.y - bh - 17 * z);
+      }
+    }
+  }
+
+  // Disconnected warning — no road to HQ
+  if (b.type !== 'hq' && z > 0.5) {
+    var bDef2 = BLDG[b.type];
+    var bFlag = getFlagAt(b.tx, b.ty + (bDef2.size || 1));
+    var disconnected = true;
+    if (bFlag) {
+      // Check if flag has any road connections
+      for (var rci = 0; rci < roads.length; rci++) {
+        if ((roads[rci].from.tx === bFlag.tx && roads[rci].from.ty === bFlag.ty) ||
+            (roads[rci].to.tx === bFlag.tx && roads[rci].to.ty === bFlag.ty)) {
+          disconnected = false; break;
+        }
+      }
+    }
+    if (disconnected) {
+      var warnPulse = 0.5 + Math.sin(tick * 0.1) * 0.3;
+      ctx.fillStyle = 'rgba(200,60,40,' + warnPulse + ')';
+      ctx.font = 'bold ' + Math.max(10, 12 * z) + 'px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText('No road!', s.x, s.y - bh - (b.built ? 8 : 22) * z);
+    }
+  }
+
+  // HQ flag
+  if (b.type === 'hq') {
+    ctx.strokeStyle = '#8a5020';
+    ctx.lineWidth = 1.5 * z;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y - bh - 8 * z);
+    ctx.lineTo(s.x, s.y - bh - 22 * z);
+    ctx.stroke();
+    // Flag
+    ctx.fillStyle = '#d04040';
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y - bh - 22 * z);
+    ctx.lineTo(s.x + 8 * z, s.y - bh - 19 * z);
+    ctx.lineTo(s.x, s.y - bh - 16 * z);
+    ctx.fill();
+  }
+
+  // Label
+  if (cam.zoom > 0.6) {
+    ctx.fillStyle = '#c8d8e8';
+    ctx.font = Math.max(8, 9 * z) + 'px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText(def.name, s.x, s.y + 10 * z);
+  }
+}
+
+function drawFlag(f) {
+  var iso = tileToIso(f.tx, f.ty);
+  var s = worldToScreen(iso.x, iso.y);
+  var z = cam.zoom;
+
+  // Highlight flags in road mode — pulsing ring to help player find connection points
+  if (mode === 'road') {
+    var ringPulse = 0.3 + Math.sin(tick * 0.08 + f.tx * 2 + f.ty) * 0.15;
+    ctx.strokeStyle = roadStart === f ? 'rgba(80,200,80,' + ringPulse + ')' : 'rgba(200,180,80,' + ringPulse + ')';
+    ctx.lineWidth = 2 * z;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y - 7 * z, 8 * z, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Pole
+  ctx.strokeStyle = '#8a7050';
+  ctx.lineWidth = 1.5 * z;
+  ctx.beginPath();
+  ctx.moveTo(s.x, s.y);
+  ctx.lineTo(s.x, s.y - 14 * z);
+  ctx.stroke();
+
+  // Flag pennant
+  ctx.fillStyle = '#e0c040';
+  ctx.beginPath();
+  ctx.moveTo(s.x, s.y - 14 * z);
+  ctx.lineTo(s.x + 5 * z, s.y - 12 * z);
+  ctx.lineTo(s.x, s.y - 10 * z);
+  ctx.fill();
+
+  // Item count badges — yellow normal, orange when getting full, red when full
+  if (f.items.length > 0 && cam.zoom > 0.5) {
+    var full = f.items.length >= 8;
+    var warn = f.items.length >= 6;
+    ctx.fillStyle = full ? 'rgba(140,30,30,0.8)' : warn ? 'rgba(140,90,20,0.7)' : 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y - 18 * z, 5 * z, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = full ? '#ff6060' : warn ? '#ffa040' : '#ff0';
+    ctx.font = Math.max(6, 7 * z) + 'px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(f.items.length, s.x, s.y - 18 * z);
+    ctx.textBaseline = 'alphabetic';
+    // Pulsing glow when full
+    if (full) {
+      var pulse = 0.3 + Math.sin(tick * 0.1) * 0.15;
+      ctx.strokeStyle = 'rgba(255,80,80,' + pulse + ')';
+      ctx.lineWidth = 1.5 * z;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y - 18 * z, 7 * z, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // Show item dots around flag base when zoomed in
+    if (cam.zoom > 0.7) {
+      for (var fi2 = 0; fi2 < f.items.length; fi2++) {
+        var angle = (fi2 / 8) * Math.PI * 2 - Math.PI / 2;
+        var dotX = s.x + Math.cos(angle) * 5 * z;
+        var dotY = s.y + 2 * z + Math.sin(angle) * 3 * z;
+        ctx.fillStyle = ITEM_COLORS[f.items[fi2]] || '#888';
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 1.5 * z, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+function drawRoad(r) {
+  var from = tileToIso(r.from.tx, r.from.ty);
+  var to = tileToIso(r.to.tx, r.to.ty);
+  var sf = worldToScreen(from.x, from.y);
+  var st = worldToScreen(to.x, to.y);
+
+  ctx.strokeStyle = '#8a7a60';
+  ctx.lineWidth = 2.5 * cam.zoom;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(sf.x, sf.y);
+  ctx.lineTo(st.x, st.y);
+  ctx.stroke();
+
+  // Road dots
+  ctx.fillStyle = '#706050';
+  var steps = 4;
+  for (var i = 1; i < steps; i++) {
+    var t = i / steps;
+    var px = sf.x + (st.x - sf.x) * t;
+    var py = sf.y + (st.y - sf.y) * t;
+    ctx.beginPath();
+    ctx.arc(px, py, 1.5 * cam.zoom, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawCarrier(c) {
+  var z = cam.zoom;
+  // Interpolate position
+  var fromIso = tileToIso(c.tx, c.ty);
+  var toIso = tileToIso(c.targetTx, c.targetTy);
+  var t = c.moveProgress || 0;
+  var wx = fromIso.x + (toIso.x - fromIso.x) * t;
+  var wy = fromIso.y + (toIso.y - fromIso.y) * t;
+  var s = worldToScreen(wx, wy);
+
+  // Walking bounce
+  var bounce = c.state === 'walking' ? Math.abs(Math.sin(tick * 0.15)) * 2 * z : 0;
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(s.x, s.y + 1 * z, 3 * z, 1.5 * z, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Legs (when walking)
+  if (c.state === 'walking') {
+    var legSwing = Math.sin(tick * 0.15) * 2 * z;
+    ctx.strokeStyle = '#8a6a40';
+    ctx.lineWidth = 1.2 * z;
+    ctx.beginPath();
+    ctx.moveTo(s.x - 1 * z, s.y - 2 * z - bounce);
+    ctx.lineTo(s.x - 1 * z + legSwing, s.y);
+    ctx.moveTo(s.x + 1 * z, s.y - 2 * z - bounce);
+    ctx.lineTo(s.x + 1 * z - legSwing, s.y);
+    ctx.stroke();
+  }
+
+  // Body (tunic)
+  ctx.fillStyle = '#6a8a50';
+  ctx.beginPath();
+  ctx.moveTo(s.x - 3 * z, s.y - 2 * z - bounce);
+  ctx.lineTo(s.x + 3 * z, s.y - 2 * z - bounce);
+  ctx.lineTo(s.x + 2 * z, s.y - 7 * z - bounce);
+  ctx.lineTo(s.x - 2 * z, s.y - 7 * z - bounce);
+  ctx.closePath();
+  ctx.fill();
+
+  // Head
+  ctx.fillStyle = '#e0c090';
+  ctx.beginPath();
+  ctx.arc(s.x, s.y - 9 * z - bounce, 2.5 * z, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hat
+  ctx.fillStyle = '#704020';
+  ctx.beginPath();
+  ctx.arc(s.x, s.y - 10.5 * z - bounce, 2.8 * z, Math.PI, 0);
+  ctx.fill();
+
+  // Carrying — item on shoulder
+  if (c.carrying) {
+    var itemColor = ITEM_COLORS[c.carrying] || '#fff';
+    ctx.fillStyle = itemColor;
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 0.5 * z;
+    ctx.beginPath();
+    ctx.arc(s.x + 3 * z, s.y - 8 * z - bounce, 2.5 * z, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Item label at zoom
+    if (cam.zoom > 0.7) {
+      ctx.fillStyle = '#fff';
+      ctx.font = Math.max(6, 7 * z) + 'px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText(c.carrying.charAt(0).toUpperCase(), s.x + 3 * z, s.y - 7 * z - bounce);
+    }
+  }
+}
+
+var ITEM_COLORS = {
+  wood: '#8a5a30', planks: '#c0a060', stone: '#808080',
+  grain: '#d0b040', flour: '#e0d8c0', bread: '#b08040',
+  fish: '#5090b0', water: '#4080c0', meat: '#a04040',
+  ironore: '#8a4a30', coal: '#303030', goldore: '#d0b030',
+  iron: '#909090', tools: '#707080', coins: '#e0c040'
+};
+
+function shadeColor(color, percent) {
+  var num = parseInt(color.replace('#',''), 16);
+  var r = Math.max(0, Math.min(255, (num >> 16) + percent));
+  var g = Math.max(0, Math.min(255, ((num >> 8) & 0xff) + percent));
+  var b = Math.max(0, Math.min(255, (num & 0xff) + percent));
+  return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+}
+
+// ===== HIGHLIGHT / PLACEMENT PREVIEW =====
+var hoverTile = {tx: -1, ty: -1};
+var roadStart = null; // flag we're drawing road from
+
+function drawPlacementPreview() {
+  if (hoverTile.tx < 0 || hoverTile.tx >= MAP_W || hoverTile.ty < 0 || hoverTile.ty >= MAP_H) return;
+
+  var iso = tileToIso(hoverTile.tx, hoverTile.ty);
+  var s = worldToScreen(iso.x, iso.y);
+  var hw = TW / 2 * cam.zoom;
+  var hh = TH / 2 * cam.zoom;
+
+  // Highlight tile
+  ctx.beginPath();
+  ctx.moveTo(s.x, s.y - hh);
+  ctx.lineTo(s.x + hw, s.y);
+  ctx.lineTo(s.x, s.y + hh);
+  ctx.lineTo(s.x - hw, s.y);
+  ctx.closePath();
+
+  var canPlace = false;
+  if (mode === 'build' && selectedBuilding) {
+    canPlace = canPlaceBuilding(selectedBuilding, hoverTile.tx, hoverTile.ty);
+  } else if (mode === 'road') {
+    canPlace = true; // simplified
+  } else if (mode === 'demolish') {
+    canPlace = getBuildingAt(hoverTile.tx, hoverTile.ty) || getFlagAt(hoverTile.tx, hoverTile.ty);
+  }
+
+  ctx.fillStyle = canPlace ? 'rgba(80,200,80,0.25)' : 'rgba(200,80,80,0.25)';
+  ctx.fill();
+  ctx.strokeStyle = canPlace ? 'rgba(80,200,80,0.6)' : 'rgba(200,80,80,0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Show where the building's flag would go and suggest nearest connected flag
+  if (mode === 'build' && selectedBuilding && canPlace) {
+    var def = BLDG[selectedBuilding];
+    var flagTy = hoverTile.ty + def.size;
+    if (flagTy < MAP_H) {
+      var fIso = tileToIso(hoverTile.tx, flagTy);
+      var fS = worldToScreen(fIso.x, fIso.y);
+      // Draw flag marker
+      ctx.fillStyle = 'rgba(200,180,80,0.5)';
+      ctx.beginPath();
+      ctx.arc(fS.x, fS.y, 4 * cam.zoom, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(200,180,80,0.4)';
+      ctx.font = Math.max(8, 9 * cam.zoom) + 'px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText('flag', fS.x, fS.y + 10 * cam.zoom);
+
+      // Find nearest existing flag and draw suggested road
+      var nearest = findNearestFlag(hoverTile.tx, flagTy);
+      if (nearest && (nearest.tx !== hoverTile.tx || nearest.ty !== flagTy)) {
+        var nIso = tileToIso(nearest.tx, nearest.ty);
+        var nS = worldToScreen(nIso.x, nIso.y);
+        ctx.strokeStyle = 'rgba(200,180,80,0.3)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 5]);
+        ctx.beginPath();
+        ctx.moveTo(fS.x, fS.y);
+        ctx.lineTo(nS.x, nS.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
+  // Road preview line
+  if (mode === 'road' && roadStart) {
+    var fromIso = tileToIso(roadStart.tx, roadStart.ty);
+    var sf = worldToScreen(fromIso.x, fromIso.y);
+    ctx.strokeStyle = 'rgba(200,180,80,0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(sf.x, sf.y);
+    ctx.lineTo(s.x, s.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+// ===== SOUND =====
+var audioCtx = null;
+function initAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playSound(freq, dur, type, vol) {
+  try {
+    initAudio();
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(vol || 0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + dur);
+  } catch(e) {}
+}
+function sfxPlace() { playSound(440, 0.15, 'sine', 0.08); playSound(660, 0.1, 'sine', 0.06); }
+function sfxBuilt() { playSound(523, 0.1, 'sine', 0.08); playSound(659, 0.1, 'sine', 0.06); playSound(784, 0.15, 'sine', 0.08); }
+function sfxProduce() { playSound(880, 0.08, 'triangle', 0.04); }
+function sfxRoad() { playSound(330, 0.1, 'square', 0.04); }
+// Ambient production sounds — quiet, positional
+function sfxChop() { playSound(120, 0.04, 'square', 0.02); setTimeout(function(){ playSound(95, 0.03, 'square', 0.02); }, 80); }
+function sfxSaw() { playSound(200 + Math.random()*80, 0.06, 'sawtooth', 0.02); }
+function sfxHammer() { playSound(300, 0.03, 'square', 0.015); playSound(350, 0.02, 'square', 0.01); }
+function sfxSmelt() { playSound(150, 0.1, 'sawtooth', 0.03); playSound(80, 0.15, 'sine', 0.02); }
+
+// ===== AMBIENT MUSIC =====
+var musicEnabled = false;
+var musicDrone = null;
+var musicGain = null;
+var musicTimer = null;
+var musicMasterVol = 0.025; // very quiet background
+
+// Medieval/pastoral scales (frequencies relative to root)
+// Dorian mode for day, Aeolian (natural minor) for night
+var SCALES = {
+  day: [1, 9/8, 6/5, 4/3, 3/2, 5/3, 16/9], // Dorian
+  night: [1, 9/8, 6/5, 4/3, 3/2, 8/5, 9/5]  // Aeolian
+};
+var ROOTS = {day: 220, night: 196}; // A3 day, G3 night
+
+function toggleMusic() {
+  musicEnabled = !musicEnabled;
+  if (musicEnabled) {
+    initAudio();
+    startMusic();
+  } else {
+    stopMusic();
+  }
+}
+
+function startMusic() {
+  if (!audioCtx) return;
+  // Drone pad — soft sustained note
+  musicGain = audioCtx.createGain();
+  musicGain.gain.value = 0;
+  musicGain.connect(audioCtx.destination);
+
+  musicDrone = audioCtx.createOscillator();
+  musicDrone.type = 'sine';
+  musicDrone.frequency.value = ROOTS.day;
+  var droneGain = audioCtx.createGain();
+  droneGain.gain.value = musicMasterVol * 0.6;
+  musicDrone.connect(droneGain);
+  droneGain.connect(audioCtx.destination);
+  musicDrone.start();
+
+  // Second drone — fifth above, very quiet
+  var drone2 = audioCtx.createOscillator();
+  drone2.type = 'sine';
+  drone2.frequency.value = ROOTS.day * 3/2;
+  var d2Gain = audioCtx.createGain();
+  d2Gain.gain.value = musicMasterVol * 0.3;
+  drone2.connect(d2Gain);
+  d2Gain.connect(audioCtx.destination);
+  drone2.start();
+
+  // Store for cleanup
+  musicDrone._parts = [
+    {osc: musicDrone, gain: droneGain},
+    {osc: drone2, gain: d2Gain}
+  ];
+
+  // Start melody loop
+  scheduleMelodyNote();
+}
+
+function stopMusic() {
+  if (musicDrone && musicDrone._parts) {
+    musicDrone._parts.forEach(function(p) {
+      try { p.osc.stop(); } catch(e) {}
+    });
+  }
+  musicDrone = null;
+  if (musicTimer) clearTimeout(musicTimer);
+  musicTimer = null;
+}
+
+function scheduleMelodyNote() {
+  if (!musicEnabled || !audioCtx) return;
+
+  var daylight = getDaylight();
+  var isDay = daylight > 0.5;
+  var scale = isDay ? SCALES.day : SCALES.night;
+  var root = isDay ? ROOTS.day : ROOTS.night;
+
+  // Update drone frequency smoothly
+  if (musicDrone && musicDrone._parts) {
+    var t = audioCtx.currentTime;
+    musicDrone._parts[0].osc.frequency.setTargetAtTime(root, t, 2);
+    musicDrone._parts[1].osc.frequency.setTargetAtTime(root * 3/2, t, 2);
+    // Fade drone volume with daylight
+    var droneVol = musicMasterVol * (0.4 + daylight * 0.3);
+    musicDrone._parts[0].gain.gain.setTargetAtTime(droneVol, t, 1);
+    musicDrone._parts[1].gain.gain.setTargetAtTime(droneVol * 0.5, t, 1);
+  }
+
+  // Pick a random note from the scale
+  var degree = Math.floor(Math.random() * scale.length);
+  var octave = Math.random() < 0.3 ? 2 : 1; // occasionally go up an octave
+  var freq = root * scale[degree] * octave;
+
+  // Play the note — gentle sine with slow attack/release
+  try {
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = Math.random() < 0.7 ? 'sine' : 'triangle';
+    osc.frequency.value = freq;
+
+    // Vary note length: longer at night, shorter during busy day
+    var noteDur = isDay ? 0.8 + Math.random() * 1.2 : 1.5 + Math.random() * 2.0;
+    var vol = musicMasterVol * (0.4 + Math.random() * 0.4);
+
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(vol, audioCtx.currentTime + 0.15);
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime + noteDur * 0.6);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + noteDur);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + noteDur + 0.1);
+  } catch(e) {}
+
+  // Schedule next note — sparse, with pauses
+  var pause = isDay
+    ? 1500 + Math.random() * 3000   // day: 1.5-4.5s between notes
+    : 2500 + Math.random() * 5000;  // night: 2.5-7.5s between notes
+
+  // Occasional longer pauses (breathing room)
+  if (Math.random() < 0.15) pause += 3000 + Math.random() * 4000;
+
+  musicTimer = setTimeout(scheduleMelodyNote, pause);
+}
+
+// ===== TERRITORY =====
+var territoryCache = new Uint8Array(MAP_W * MAP_H);
+var territoryDirty = true;
+function updateTerritory() {
+  territoryCache.fill(0);
+  for (var bi = 0; bi < buildings.length; bi++) {
+    var b = buildings[bi];
+    if (!b.built) continue;
+    var def = BLDG[b.type];
+    var radius = b.type === 'hq' ? 15 : (b.type === 'guard' ? 8 : 5);
+    for (var dy = -radius; dy <= radius; dy++) {
+      for (var dx = -radius; dx <= radius; dx++) {
+        if (dx*dx + dy*dy > radius*radius) continue;
+        var tx2 = b.tx + dx, ty2 = b.ty + dy;
+        if (tx2 >= 0 && tx2 < MAP_W && ty2 >= 0 && ty2 < MAP_H) {
+          territoryCache[ty2 * MAP_W + tx2] = 1;
+        }
+      }
+    }
+  }
+  territoryDirty = false;
+}
+
+function isInTerritory(tx, ty) {
+  if (territoryDirty) updateTerritory();
+  if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return false;
+  return territoryCache[ty * MAP_W + tx] === 1;
+}
+
+// ===== GAME LOGIC =====
+function canPlaceBuilding(type, tx, ty) {
+  var def = BLDG[type];
+  if (!def) return false;
+
+  var isMine = def.category === 'mine';
+  var t = terrain[ty * MAP_W + tx];
+
+  // Mines must be on mountain tiles; other buildings cannot be on water/mountain
+  if (isMine) {
+    if (t !== TERRAIN.MOUNTAIN) return false;
+    // Check that the right mineral is nearby
+    if (def.needsMineral) {
+      var hasMineral = false;
+      for (var mdy = -def.radius; mdy <= def.radius && !hasMineral; mdy++) {
+        for (var mdx = -def.radius; mdx <= def.radius && !hasMineral; mdx++) {
+          var mmx = tx + mdx, mmy = ty + mdy;
+          if (mmx >= 0 && mmx < MAP_W && mmy >= 0 && mmy < MAP_H) {
+            if (minerals[mmy * MAP_W + mmx] === def.needsMineral) hasMineral = true;
+          }
+        }
+      }
+      if (!hasMineral) return false;
+    }
+  } else {
+    if (t === TERRAIN.WATER || t === TERRAIN.MOUNTAIN) return false;
+  }
+
+  // Check size footprint
+  for (var dy = 0; dy < def.size; dy++) {
+    for (var dx = 0; dx < def.size; dx++) {
+      var cx = tx + dx, cy = ty + dy;
+      if (cx >= MAP_W || cy >= MAP_H) return false;
+      var ct = terrain[cy * MAP_W + cx];
+      if (isMine) { if (ct !== TERRAIN.MOUNTAIN) return false; }
+      else { if (ct === TERRAIN.WATER || ct === TERRAIN.MOUNTAIN) return false; }
+      if (getBuildingAt(cx, cy)) return false;
+    }
+  }
+
+  // Check resources
+  for (var r in def.cost) {
+    if ((resources[r] || 0) < def.cost[r]) return false;
+  }
+
+  // Must be within territory
+  if (!isInTerritory(tx, ty)) return false;
+
+  // Non-housing buildings need an available worker
+  if (def.category !== 'housing' && type !== 'hq' && getAvailableWorkers() <= 0) return false;
+
+  return true;
+}
+
+function getBuildingAt(tx, ty) {
+  for (var i = 0; i < buildings.length; i++) {
+    var b = buildings[i];
+    var def = BLDG[b.type];
+    if (tx >= b.tx && tx < b.tx + def.size && ty >= b.ty && ty < b.ty + def.size) return b;
+  }
+  return null;
+}
+
+function getFlagAt(tx, ty) {
+  for (var i = 0; i < flags.length; i++) {
+    if (flags[i].tx === tx && flags[i].ty === ty) return flags[i];
+  }
+  return null;
+}
+
+function getRoadBetween(f1, f2) {
+  for (var i = 0; i < roads.length; i++) {
+    var r = roads[i];
+    if ((r.from.tx === f1.tx && r.from.ty === f1.ty && r.to.tx === f2.tx && r.to.ty === f2.ty) ||
+        (r.from.tx === f2.tx && r.from.ty === f2.ty && r.to.tx === f1.tx && r.to.ty === f1.ty)) return r;
+  }
+  return null;
+}
+
+function findNearestFlag(tx, ty) {
+  var best = null, bestDist = Infinity;
+  for (var i = 0; i < flags.length; i++) {
+    var d = Math.abs(flags[i].tx - tx) + Math.abs(flags[i].ty - ty);
+    if (d < bestDist) { bestDist = d; best = flags[i]; }
+  }
+  return best;
+}
+
+function findConnectedFlag(fromFlag, excludeFlag) {
+  // Find flags connected to fromFlag via roads
+  var connected = [];
+  for (var i = 0; i < roads.length; i++) {
+    var r = roads[i];
+    if (r.from.tx === fromFlag.tx && r.from.ty === fromFlag.ty) {
+      var f = getFlagAt(r.to.tx, r.to.ty);
+      if (f && f !== excludeFlag) connected.push(f);
+    }
+    if (r.to.tx === fromFlag.tx && r.to.ty === fromFlag.ty) {
+      var f2 = getFlagAt(r.from.tx, r.from.ty);
+      if (f2 && f2 !== excludeFlag) connected.push(f2);
+    }
+  }
+  return connected;
+}
+
+// Find path from one flag to HQ (BFS through flag network)
+function findPathToHQ(startFlag) {
+  var hq = buildings.find(function(b) { return b.type === 'hq'; });
+  if (!hq) return null;
+  var hqFlag = findNearestFlag(hq.tx, hq.ty + 3);
+  if (!hqFlag) return null;
+  if (startFlag === hqFlag) return [hqFlag];
+
+  var visited = new Set();
+  var queue = [[startFlag]];
+  visited.add(startFlag.tx + ',' + startFlag.ty);
+
+  while (queue.length > 0) {
+    var path = queue.shift();
+    var current = path[path.length - 1];
+    var neighbors = findConnectedFlag(current, null);
+    for (var i = 0; i < neighbors.length; i++) {
+      var key = neighbors[i].tx + ',' + neighbors[i].ty;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      var newPath = path.concat([neighbors[i]]);
+      if (neighbors[i] === hqFlag) return newPath;
+      queue.push(newPath);
+    }
+  }
+  return null;
+}
+
+function placeBuilding(type, tx, ty) {
+  if (!canPlaceBuilding(type, tx, ty)) return false;
+  var def = BLDG[type];
+
+  // Deduct resources
+  for (var r in def.cost) {
+    resources[r] -= def.cost[r];
+  }
+
+  var b = createBuilding(type, tx, ty);
+  buildings.push(b);
+  territoryDirty = true;
+  mmDirty = true;
+  sfxPlace();
+
+  // Auto-place flag near building (directly below)
+  var flagTx = tx, flagTy = ty + def.size;
+  var newFlag = getFlagAt(flagTx, flagTy);
+  if (!newFlag && flagTy < MAP_H) {
+    var ft = terrain[flagTy * MAP_W + flagTx];
+    if (ft !== TERRAIN.WATER) {
+      newFlag = {tx: flagTx, ty: flagTy, items: []};
+      flags.push(newFlag);
+    }
+  }
+
+  // Auto-connect to nearest existing flag (if within road range)
+  if (newFlag) {
+    var bestFlag = null, bestDist = Infinity;
+    for (var fi = 0; fi < flags.length; fi++) {
+      var cf = flags[fi];
+      if (cf === newFlag) continue;
+      var fd = Math.abs(cf.tx - newFlag.tx) + Math.abs(cf.ty - newFlag.ty);
+      if (fd <= 8 && fd < bestDist) {
+        // Prefer flags that are already connected to the road network
+        var isConnected = false;
+        for (var ri = 0; ri < roads.length; ri++) {
+          if ((roads[ri].from.tx === cf.tx && roads[ri].from.ty === cf.ty) ||
+              (roads[ri].to.tx === cf.tx && roads[ri].to.ty === cf.ty)) {
+            isConnected = true; break;
+          }
+        }
+        // HQ flag is always "connected"
+        var hq2 = buildings.find(function(b2) { return b2.type === 'hq'; });
+        if (hq2 && cf.tx === hq2.tx && cf.ty === hq2.ty + 3) isConnected = true;
+        if (isConnected && fd < bestDist) {
+          bestDist = fd;
+          bestFlag = cf;
+        }
+      }
+    }
+    if (bestFlag && !getRoadBetween(newFlag, bestFlag)) {
+      placeRoad(newFlag, bestFlag);
+    }
+  }
+
+  updateResourceDisplay();
+  return true;
+}
+
+function placeFlag(tx, ty) {
+  if (getFlagAt(tx, ty)) return false;
+  var t = terrain[ty * MAP_W + tx];
+  if (t === TERRAIN.WATER) return false;
+  if (getBuildingAt(tx, ty)) return false;
+  flags.push({tx: tx, ty: ty, items: []});
+  return true;
+}
+
+function placeRoad(f1, f2) {
+  if (getRoadBetween(f1, f2)) return false;
+  // Check distance — roads between nearby flags
+  var dist = Math.abs(f1.tx - f2.tx) + Math.abs(f1.ty - f2.ty);
+  if (dist > 8) return false;
+  roads.push({from: {tx: f1.tx, ty: f1.ty}, to: {tx: f2.tx, ty: f2.ty}});
+  sfxRoad();
+  // Spawn a carrier for this road
+  carriers.push({
+    tx: f1.tx, ty: f1.ty,
+    targetTx: f1.tx, targetTy: f1.ty,
+    carrying: null,
+    roadFrom: f1, roadTo: f2,
+    state: 'idle', // idle, walking, delivering
+    moveProgress: 0,
+    moveSpeed: 0.03,
+    waitTimer: 0,
+    goingTo: null // which flag we're heading to
+  });
+  return true;
+}
+
+// ===== SIMULATION =====
+function simulate() {
+  if (speed === 0) return;
+  for (var sp = 0; sp < speed; sp++) {
+    tick++;
+    gameTime += 0.5;
+
+    // === FIX: Buildings auto-pull from their own flag ===
+    // Buildings grab construction materials and production inputs from their adjacent flag
+    if (tick % 10 === 0) {
+      for (var api = 0; api < buildings.length; api++) {
+        var ab = buildings[api];
+        if (ab.type === 'hq') continue;
+        var aDef = BLDG[ab.type];
+        var aFlagTy = ab.ty + (aDef.size || 1);
+        var aFlag = getFlagAt(ab.tx, aFlagTy);
+        if (!aFlag) continue;
+        if (aFlag.items.length === 0 && ab.built) continue;
+
+        if (!ab.built) {
+          // Direct construction: claim materials from HQ if connected via road
+          // (Materials already paid for at placement — this is just the delivery)
+          if (findPathToHQ(aFlag)) {
+            for (var cmk in ab.materialsNeeded) {
+              if (ab.materialsNeeded[cmk] > 0) {
+                ab.materialsNeeded[cmk]--;
+                var abiso = tileToIso(ab.tx, ab.ty);
+                floatingTexts.push({x: abiso.x, y: abiso.y, text: '+' + cmk, color: '#c0a060', life: 45, maxLife: 45});
+                break; // one material per cycle for visual pacing
+              }
+            }
+          }
+          // Also pull any items on our flag (legacy/carrier-delivered)
+          for (var afi = aFlag.items.length - 1; afi >= 0; afi--) {
+            var aItem = aFlag.items[afi];
+            if (ab.materialsNeeded && (ab.materialsNeeded[aItem] || 0) > 0) {
+              ab.materialsNeeded[aItem]--;
+              aFlag.items.splice(afi, 1);
+            }
+          }
+          // Clear non-construction items from this flag
+          if (aFlag.items.length > 2) {
+            for (var afi4 = aFlag.items.length - 1; afi4 >= 0; afi4--) {
+              var clearItem = aFlag.items[afi4];
+              var isConstMat = ab.materialsNeeded && (ab.materialsNeeded[clearItem] || 0) > 0;
+              if (!isConstMat) {
+                var pushed2 = false;
+                var cFlags = findConnectedFlag(aFlag, null);
+                for (var cfi2 = 0; cfi2 < cFlags.length; cfi2++) {
+                  var cf3 = getFlagAt(cFlags[cfi2].tx, cFlags[cfi2].ty);
+                  if (cf3 && cf3.items.length < 6) {
+                    cf3.items.push(clearItem);
+                    aFlag.items.splice(afi4, 1);
+                    pushed2 = true;
+                    break;
+                  }
+                }
+                if (!pushed2) {
+                  resources[clearItem] = (resources[clearItem] || 0) + 1;
+                  aFlag.items.splice(afi4, 1);
+                }
+              }
+            }
+          }
+        } else {
+          // Pull production inputs from flag
+          if (aDef.needs) {
+            for (var afi2 = aFlag.items.length - 1; afi2 >= 0; afi2--) {
+              if (aFlag.items[afi2] === aDef.needs && (ab.storage[aDef.needs] || 0) < 5) {
+                ab.storage[aDef.needs] = (ab.storage[aDef.needs] || 0) + 1;
+                aFlag.items.splice(afi2, 1);
+                break;
+              }
+            }
+          }
+          if (aDef.needs2) {
+            for (var afi3 = aFlag.items.length - 1; afi3 >= 0; afi3--) {
+              if (aFlag.items[afi3] === aDef.needs2 && (ab.storage[aDef.needs2] || 0) < 5) {
+                ab.storage[aDef.needs2] = (ab.storage[aDef.needs2] || 0) + 1;
+                aFlag.items.splice(afi3, 1);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // === FIX: HQ flag auto-stores items into resources (only when congested) ===
+    if (tick % 15 === 0) {
+      var hqAS = buildings.find(function(b) { return b.type === 'hq'; });
+      if (hqAS) {
+        var hqASFlag = getFlagAt(hqAS.tx, hqAS.ty + 3);
+        if (hqASFlag && hqASFlag.items.length >= 5) {
+          // Build set of items needed for construction (these were already paid for — don't re-add to resources)
+          var constNeeds = {};
+          for (var cni = 0; cni < buildings.length; cni++) {
+            var cnb = buildings[cni];
+            if (!cnb.built && cnb.materialsNeeded) {
+              for (var cnr in cnb.materialsNeeded) {
+                if (cnb.materialsNeeded[cnr] > 0) constNeeds[cnr] = (constNeeds[cnr] || 0) + cnb.materialsNeeded[cnr];
+              }
+            }
+          }
+          var stored = 0;
+          for (var hfi = hqASFlag.items.length - 1; hfi >= 0 && stored < 2; hfi--) {
+            var hItem = hqASFlag.items[hfi];
+            // Skip items that are construction materials — returning them would duplicate resources
+            if (constNeeds[hItem] && constNeeds[hItem] > 0) {
+              constNeeds[hItem]--;
+              continue;
+            }
+            resources[hItem] = (resources[hItem] || 0) + 1;
+            hqASFlag.items.splice(hfi, 1);
+            stored++;
+          }
+          if (stored > 0) updateResourceDisplay();
+        }
+      }
+    }
+
+    // === FIX: Clear congested flags — route excess items toward HQ ===
+    if (tick % 25 === 0) {
+      for (var cfi = 0; cfi < flags.length; cfi++) {
+        var cf2 = flags[cfi];
+        if (cf2.items.length < 5) continue;
+        // Check which items are not needed by the adjacent building
+        var cfBld = getBuildingForFlag(cf2.tx, cf2.ty);
+        for (var cii = cf2.items.length - 1; cii >= 0; cii--) {
+          var cItem = cf2.items[cii];
+          var needed = false;
+          if (cfBld) {
+            if (!cfBld.built && cfBld.materialsNeeded && (cfBld.materialsNeeded[cItem] || 0) > 0) needed = true;
+            if (cfBld.built) {
+              var cDef = BLDG[cfBld.type];
+              if (cDef.needs === cItem || cDef.needs2 === cItem) needed = true;
+            }
+          }
+          if (!needed) {
+            // Try to send to a connected flag with space
+            var routed = false;
+            var connFlags = findConnectedFlag(cf2, null);
+            for (var cni = 0; cni < connFlags.length; cni++) {
+              var cnf = getFlagAt(connFlags[cni].tx, connFlags[cni].ty);
+              if (cnf && cnf.items.length < 4) {
+                cnf.items.push(cItem);
+                cf2.items.splice(cii, 1);
+                routed = true;
+                break;
+              }
+            }
+            // Emergency overflow: if flag is completely full and can't route, teleport to HQ
+            if (!routed && cf2.items.length >= 8) {
+              resources[cItem] = (resources[cItem] || 0) + 1;
+              cf2.items.splice(cii, 1);
+              updateResourceDisplay();
+            }
+          }
+        }
+      }
+    }
+
+    // HQ outputs: push resources to HQ flag for buildings that need them
+    if (tick % 20 === 0) {
+      var hqB = buildings.find(function(b) { return b.type === 'hq'; });
+      if (hqB) {
+        var hqFlag = getFlagAt(hqB.tx, hqB.ty + 3);
+        if (hqFlag && hqFlag.items.length < 4) { // reduced from 6 to prevent congestion
+          // Find what any building needs — split into construction vs production
+          var constructionNeeded = {};
+          var productionNeeded = {};
+          for (var ni = 0; ni < buildings.length; ni++) {
+            var nb = buildings[ni];
+            if (nb.type === 'hq') continue;
+            var ndef = BLDG[nb.type];
+            if (!nb.built) {
+              // Construction materials — already paid for at placement
+              // Only push if the building's flag is reachable via road network
+              var nbFlag = getFlagAt(nb.tx, nb.ty + (ndef.size || 1));
+              if (nbFlag && findPathToHQ(nbFlag)) {
+                for (var cmr in nb.materialsNeeded) {
+                  if (nb.materialsNeeded[cmr] > 0) constructionNeeded[cmr] = (constructionNeeded[cmr] || 0) + nb.materialsNeeded[cmr];
+                }
+              }
+              continue;
+            }
+            if (ndef.needs && (nb.storage[ndef.needs] || 0) < 3) productionNeeded[ndef.needs] = true;
+            if (ndef.needs2 && (nb.storage[ndef.needs2] || 0) < 3) productionNeeded[ndef.needs2] = true;
+          }
+
+          // Construction materials are now delivered directly (see auto-pull section)
+          // Only push production inputs below
+          var pushed = 0;
+          // Then push production inputs (costs from stockpile)
+          for (var pres in productionNeeded) {
+            if (pushed >= 2 || hqFlag.items.length >= 6) break;
+            if ((resources[pres] || 0) > 0) {
+              var onFlag2 = hqFlag.items.filter(function(it) { return it === pres; }).length;
+              if (onFlag2 < 2) {
+                resources[pres]--;
+                hqFlag.items.push(pres);
+                pushed++;
+              }
+            }
+          }
+          if (pushed > 0) updateResourceDisplay();
+        }
+      }
+    }
+
+    // Food consumption — each worker eats food from HQ every 600 ticks
+    if (tick % 600 === 0) {
+      var foodTypes = ['bread', 'fish', 'meat'];
+      var workerCount = population.employed;
+      var foodNeeded = Math.ceil(workerCount / 3); // 1 food per 3 workers
+      for (var fn = 0; fn < foodNeeded; fn++) {
+        var ate = false;
+        for (var ft2 = 0; ft2 < foodTypes.length && !ate; ft2++) {
+          if ((resources[foodTypes[ft2]] || 0) > 0) {
+            resources[foodTypes[ft2]]--;
+            ate = true;
+          }
+        }
+      }
+      if (foodNeeded > 0) updateResourceDisplay();
+    }
+
+    // Update economy display every 120 ticks
+    if (tick % 120 === 0) { updatePopulation(); updateEconomy(); }
+
+    // Update buildings
+    for (var i = 0; i < buildings.length; i++) {
+      var b = buildings[i];
+      var def = BLDG[b.type];
+
+      // Construction — needs materials delivered, then builds
+      if (!b.built) {
+        // Check if all materials delivered
+        var allDelivered = true;
+        for (var mr in b.materialsNeeded) {
+          if (b.materialsNeeded[mr] > 0) { allDelivered = false; break; }
+        }
+        // If no cost (HQ), instant build
+        if (allDelivered || Object.keys(b.materialsTotal).length === 0) {
+          b.progress += 0.005;
+          if (b.progress >= 1) {
+            b.built = true;
+            b.progress = 1;
+            territoryDirty = true;
+            mmDirty = true;
+            var biso = tileToIso(b.tx, b.ty);
+            floatingTexts.push({x: biso.x, y: biso.y, text: def.name + ' built!', color: '#8ac0ff', life: 90, maxLife: 90});
+            sfxBuilt();
+          }
+        }
+        continue;
+      }
+
+      // Production
+      if (b.cooldown > 0) { b.cooldown--; continue; }
+
+      // Housing buildings don't produce — skip
+      if (b.type === 'cottage' || b.type === 'house') continue;
+
+      // Throttle production if flag is congested — don't produce if flag nearly full
+      var prodFlagTy2 = b.ty + (def.size || 1);
+      var prodFlag2 = getFlagAt(b.tx, prodFlagTy2);
+      if (prodFlag2 && prodFlag2.items.length >= 6 && def.produces) {
+        b.cooldown = 30; // wait a bit and check again
+        b.working = false;
+        continue;
+      }
+
+      var hMult = getHappinessMultiplier();
+      var seasonMod = getSeasonModifier(b.type);
+      if (seasonMod === null) { b.working = false; b.cooldown = 60; continue; }
+
+      // Tavern logic — consume bread, boost morale
+      if (b.type === 'tavern') {
+        if ((b.storage.bread || 0) > 0) {
+          b.storage.bread--;
+          b.working = true;
+          var tiso = tileToIso(b.tx, b.ty);
+          floatingTexts.push({x: tiso.x, y: tiso.y, text: '🍺 Cheers!', color: '#c0a050', life: 60, maxLife: 60});
+        } else {
+          b.working = false;
+        }
+        b.cooldown = def.interval;
+        continue;
+      }
+      if (b.type === 'forester') {
+        // Plant trees nearby
+        var planted = false;
+        for (var attempt = 0; attempt < 5; attempt++) {
+          var dx = Math.floor(Math.random() * (def.radius * 2 + 1)) - def.radius;
+          var dy = Math.floor(Math.random() * (def.radius * 2 + 1)) - def.radius;
+          var px = b.tx + dx, py = b.ty + dy;
+          if (px >= 0 && px < MAP_W && py >= 0 && py < MAP_H) {
+            var ti = py * MAP_W + px;
+            if (terrain[ti] === TERRAIN.GRASS && !getBuildingAt(px, py)) {
+              terrain[ti] = TERRAIN.FOREST;
+              planted = true;
+              mmDirty = true;
+              break;
+            }
+          }
+        }
+        b.working = planted;
+        b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+      }
+      else if (def.produces && !def.needs) {
+        // Gatherer — produces from environment
+        if (b.type === 'woodcutter') {
+          // Find nearby forest tile
+          var found = false;
+          for (var dx2 = -def.radius; dx2 <= def.radius && !found; dx2++) {
+            for (var dy2 = -def.radius; dy2 <= def.radius && !found; dy2++) {
+              var fx = b.tx + dx2, fy = b.ty + dy2;
+              if (fx >= 0 && fx < MAP_W && fy >= 0 && fy < MAP_H) {
+                if (terrain[fy * MAP_W + fx] === TERRAIN.FOREST) {
+                  terrain[fy * MAP_W + fx] = TERRAIN.GRASS;
+                  mmDirty = true;
+                  depositItem(b, def.produces);
+                  sfxChop();
+                  found = true;
+                }
+              }
+            }
+          }
+          b.working = found;
+          b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'quarry') {
+          var foundS = false;
+          for (var dx3 = -def.radius; dx3 <= def.radius && !foundS; dx3++) {
+            for (var dy3 = -def.radius; dy3 <= def.radius && !foundS; dy3++) {
+              var sx = b.tx + dx3, sy = b.ty + dy3;
+              if (sx >= 0 && sx < MAP_W && sy >= 0 && sy < MAP_H) {
+                if (terrain[sy * MAP_W + sx] === TERRAIN.STONE) {
+                  // 30% chance to deplete the tile (stone lasts longer)
+                  if (Math.random() < 0.3) {
+                    terrain[sy * MAP_W + sx] = TERRAIN.HILL;
+                    mmDirty = true;
+                  }
+                  depositItem(b, def.produces);
+                  sfxHammer();
+                  foundS = true;
+                }
+              }
+            }
+          }
+          b.working = foundS;
+          b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'fisher') {
+          // Need water nearby
+          var hasWater = false;
+          for (var dx4 = -def.radius; dx4 <= def.radius && !hasWater; dx4++) {
+            for (var dy4 = -def.radius; dy4 <= def.radius && !hasWater; dy4++) {
+              var wx2 = b.tx + dx4, wy2 = b.ty + dy4;
+              if (wx2 >= 0 && wx2 < MAP_W && wy2 >= 0 && wy2 < MAP_H) {
+                if (terrain[wy2 * MAP_W + wx2] === TERRAIN.WATER) hasWater = true;
+              }
+            }
+          }
+          if (hasWater) {
+            depositItem(b, 'fish');
+            b.working = true;
+          } else {
+            b.working = false;
+          }
+          b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'well') {
+          depositItem(b, 'water');
+          b.working = true;
+          b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'hunter') {
+          // Hunt nearby animals (prefer deer, fallback to rabbits)
+          var hunted = false;
+          for (var ha = 0; ha < animals.length && !hunted; ha++) {
+            var prey = animals[ha];
+            var hdx = prey.tx - b.tx, hdy = prey.ty - b.ty;
+            if (Math.abs(hdx) <= def.radius && Math.abs(hdy) <= def.radius) {
+              animals.splice(ha, 1);
+              depositItem(b, 'meat');
+              hunted = true;
+            }
+          }
+          // Fallback: hunt if forest nearby (even without visible animals)
+          if (!hunted) {
+            var hasForest = false;
+            for (var dx5 = -def.radius; dx5 <= def.radius && !hasForest; dx5++) {
+              for (var dy5 = -def.radius; dy5 <= def.radius && !hasForest; dy5++) {
+                var hx = b.tx + dx5, hy = b.ty + dy5;
+                if (hx >= 0 && hx < MAP_W && hy >= 0 && hy < MAP_H) {
+                  if (terrain[hy * MAP_W + hx] === TERRAIN.FOREST) hasForest = true;
+                }
+              }
+            }
+            if (hasForest) {
+              depositItem(b, 'meat');
+              hunted = true;
+            }
+          }
+          b.working = hunted;
+          b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'farm') {
+          depositItem(b, 'grain');
+          b.working = true;
+          b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (def.category === 'mine') {
+          // Mine — extract from nearby mineral deposits
+          var mined = false;
+          for (var mdx2 = -def.radius; mdx2 <= def.radius && !mined; mdx2++) {
+            for (var mdy2 = -def.radius; mdy2 <= def.radius && !mined; mdy2++) {
+              var mmx2 = b.tx + mdx2, mmy2 = b.ty + mdy2;
+              if (mmx2 >= 0 && mmx2 < MAP_W && mmy2 >= 0 && mmy2 < MAP_H) {
+                var mIdx = mmy2 * MAP_W + mmx2;
+                if (minerals[mIdx] === def.needsMineral) {
+                  // 15% chance to deplete mineral deposit each harvest
+                  if (Math.random() < 0.15) {
+                    minerals[mIdx] = MINERAL.NONE;
+                    mmDirty = true;
+                  }
+                  depositItem(b, def.produces);
+                  sfxHammer();
+                  mined = true;
+                }
+              }
+            }
+          }
+          b.working = mined;
+          b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+      }
+      else if (def.produces && def.needs) {
+        // Processor — needs input, produces output
+        var hasInput = (b.storage[def.needs] || 0) > 0;
+        var hasInput2 = !def.needs2 || (b.storage[def.needs2] || 0) > 0;
+        if (hasInput && hasInput2) {
+          b.storage[def.needs] = (b.storage[def.needs] || 0) - 1;
+          if (def.needs2) b.storage[def.needs2] = (b.storage[def.needs2] || 0) - 1;
+          depositItem(b, def.produces);
+          if (b.type === 'sawmill') sfxSaw();
+          else if (b.type === 'smelter') sfxSmelt();
+          else if (b.type === 'toolmaker') sfxHammer();
+          else sfxProduce();
+          b.working = true;
+        } else {
+          b.working = false;
+        }
+        b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+      }
+    }
+
+    // Update carriers
+    for (var ci = 0; ci < carriers.length; ci++) {
+      updateCarrier(carriers[ci]);
+    }
+
+    // Update animals — wander slowly through forests
+    if (tick % 8 === 0) {
+      for (var ai2 = 0; ai2 < animals.length; ai2++) {
+        var an = animals[ai2];
+        an.timer--;
+        if (an.timer <= 0) {
+          an.timer = 60 + Math.floor(Math.random() * 120);
+          an.dir = Math.floor(Math.random() * 4);
+          var dx = [0, 1, 0, -1][an.dir], dy = [-1, 0, 1, 0][an.dir];
+          var nx = an.tx + dx, ny = an.ty + dy;
+          if (nx >= 0 && nx < MAP_W && ny >= 0 && ny < MAP_H) {
+            var nt = terrain[ny * MAP_W + nx];
+            if (nt === TERRAIN.FOREST || nt === TERRAIN.GRASS) {
+              an.tx = nx; an.ty = ny;
+            }
+          }
+        }
+        an.phase += 0.1;
+      }
+      // Occasionally spawn new animals in forests (population recovery)
+      if (animals.length < 40 && Math.random() < 0.01) {
+        var spx = Math.floor(Math.random() * MAP_W), spy = Math.floor(Math.random() * MAP_H);
+        if (terrain[spy * MAP_W + spx] === TERRAIN.FOREST) {
+          animals.push({tx: spx, ty: spy, type: Math.random() < 0.6 ? 'deer' : 'rabbit', dir: 0, timer: 100, phase: Math.random() * Math.PI * 2});
+        }
+      }
+    }
+  }
+  updateSeasonParticles();
+}
+
+function depositItem(building, item) {
+  var def = BLDG[building.type];
+  var flagTy = building.ty + (def.size || 1);
+  var flag = getFlagAt(building.tx, flagTy) || findNearestFlag(building.tx, building.ty);
+  if (flag && flag.items.length < 8) {
+    flag.items.push(item);
+  } else {
+    building.storage[item] = (building.storage[item] || 0) + 1;
+  }
+  // Floating notification
+  var iso = tileToIso(building.tx, building.ty);
+  var s = worldToScreen(iso.x, iso.y);
+  var col = ITEM_COLORS[item] || '#fff';
+  floatingTexts.push({x: iso.x, y: iso.y, text: '+1 ' + item, color: col, life: 60, maxLife: 60});
+}
+
+function drawFloatingTexts() {
+  for (var i = floatingTexts.length - 1; i >= 0; i--) {
+    var ft = floatingTexts[i];
+    ft.life--;
+    if (ft.life <= 0) { floatingTexts.splice(i, 1); continue; }
+    var alpha = ft.life / ft.maxLife;
+    var rise = (ft.maxLife - ft.life) * 0.5;
+    var s = worldToScreen(ft.x, ft.y - rise);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = ft.color;
+    ctx.font = Math.max(9, 10 * cam.zoom) + 'px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText(ft.text, s.x, s.y - 20 * cam.zoom);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Get the building whose flag is at this position
+function getBuildingForFlag(flagTx, flagTy) {
+  for (var bi = 0; bi < buildings.length; bi++) {
+    var b = buildings[bi];
+    var def = BLDG[b.type];
+    var bFlagTy = b.ty + (def.size || 1);
+    if (b.tx === flagTx && bFlagTy === flagTy) return b;
+  }
+  return null;
+}
+
+function updateCarrier(c) {
+  if (c.state === 'idle') {
+    var f1 = c.roadFrom, f2 = c.roadTo;
+    var flag1 = getFlagAt(f1.tx, f1.ty);
+    var flag2 = getFlagAt(f2.tx, f2.ty);
+    if (!flag1 || !flag2) return;
+
+    var myFlag = (c.tx === f1.tx && c.ty === f1.ty) ? flag1 : flag2;
+    var otherFlag = (myFlag === flag1) ? flag2 : flag1;
+
+    // Smart pickup: prefer items the other building actually needs
+    if (myFlag.items.length > 0) {
+      var bestIdx = 0;
+      var otherBld = getBuildingForFlag(otherFlag.tx, otherFlag.ty);
+      if (otherBld) {
+        var odef = BLDG[otherBld.type];
+        for (var pi = 0; pi < myFlag.items.length; pi++) {
+          var pitem = myFlag.items[pi];
+          // Under construction — wants planks/stone
+          if (!otherBld.built && otherBld.materialsNeeded && (otherBld.materialsNeeded[pitem] || 0) > 0) { bestIdx = pi; break; }
+          // Built — wants production inputs
+          if (otherBld.built && (odef.needs === pitem || odef.needs2 === pitem) && (otherBld.storage[pitem] || 0) < 5) { bestIdx = pi; break; }
+        }
+      }
+      c.carrying = myFlag.items.splice(bestIdx, 1)[0];
+      c.state = 'walking';
+      c.targetTx = otherFlag.tx;
+      c.targetTy = otherFlag.ty;
+      c.moveProgress = 0;
+    }
+    // If other flag has items, walk there to get them
+    else if (otherFlag.items.length > 0) {
+      c.state = 'walking';
+      c.targetTx = otherFlag.tx;
+      c.targetTy = otherFlag.ty;
+      c.moveProgress = 0;
+    }
+  }
+  else if (c.state === 'walking') {
+    c.moveProgress += c.moveSpeed;
+    if (c.moveProgress >= 1) {
+      c.tx = c.targetTx;
+      c.ty = c.targetTy;
+      c.moveProgress = 0;
+      var returnTrip = false;
+
+      if (c.carrying) {
+        var delivered = false;
+
+        // Check: is there a building at this flag that wants this item?
+        var bldHere = getBuildingForFlag(c.tx, c.ty);
+        if (bldHere) {
+          // Under construction — deliver construction materials
+          if (!bldHere.built && bldHere.materialsNeeded && (bldHere.materialsNeeded[c.carrying] || 0) > 0) {
+            bldHere.materialsNeeded[c.carrying]--;
+            var biso2 = tileToIso(bldHere.tx, bldHere.ty);
+            floatingTexts.push({x: biso2.x, y: biso2.y, text: '+' + c.carrying, color: '#c0a060', life: 45, maxLife: 45});
+            c.carrying = null;
+            delivered = true;
+          }
+          // Built building — deliver production inputs
+          else if (bldHere.built) {
+            var bdef = BLDG[bldHere.type];
+            if (bdef.needs === c.carrying || bdef.needs2 === c.carrying) {
+              if ((bldHere.storage[c.carrying] || 0) < 5) {
+                bldHere.storage[c.carrying] = (bldHere.storage[c.carrying] || 0) + 1;
+                c.carrying = null;
+                delivered = true;
+              }
+            }
+          }
+        }
+
+        // Check: is this the HQ flag? Store everything
+        if (!delivered) {
+          var hq = buildings.find(function(b2) { return b2.type === 'hq'; });
+          if (hq) {
+            var hqFlagTy = hq.ty + 3; // HQ size is 3, flag at ty+3
+            if (c.tx === hq.tx && c.ty === hqFlagTy) {
+              resources[c.carrying] = (resources[c.carrying] || 0) + 1;
+              var hiso = tileToIso(hq.tx, hq.ty);
+              floatingTexts.push({x: hiso.x, y: hiso.y, text: '+1 ' + c.carrying, color: '#4a90d0', life: 45, maxLife: 45});
+              c.carrying = null;
+              delivered = true;
+              updateResourceDisplay();
+            }
+          }
+        }
+
+        // Otherwise leave at this flag for the next carrier
+        if (!delivered) {
+          var destFlag = getFlagAt(c.tx, c.ty);
+          if (destFlag && destFlag.items.length < 8) {
+            destFlag.items.push(c.carrying);
+            c.carrying = null;
+          } else {
+            // Flag is full — carry the item BACK instead of destroying it
+            returnTrip = true;
+            var returnTx = (c.tx === c.roadFrom.tx && c.ty === c.roadFrom.ty) ? c.roadTo.tx : c.roadFrom.tx;
+            var returnTy = (c.tx === c.roadFrom.tx && c.ty === c.roadFrom.ty) ? c.roadTo.ty : c.roadFrom.ty;
+            c.targetTx = returnTx;
+            c.targetTy = returnTy;
+            c.moveProgress = 0;
+          }
+        }
+      }
+
+      if (!returnTrip) c.state = 'idle';
+    }
+  }
+}
+
+// ===== UI =====
+function updateSeasonBadge() {
+  var s = getSeason();
+  var icons  = ['🌿','☀️','🍂','❄️'];
+  var names  = ['SPRING','SUMMER','AUTUMN','WINTER'];
+  var colors = ['#6a9058','#a09050','#a07040','#7090b0'];
+  document.getElementById('season-icon').textContent = icons[s];
+  document.getElementById('season-name').textContent = names[s];
+  document.getElementById('season-name').style.color  = colors[s];
+  document.getElementById('season-day').textContent   = 'Day ' + getSeasonDay() + ' of ' + DAYS_PER_SEASON;
+  document.getElementById('season-progress').style.width = (getSeasonProgress() * 100).toFixed(1) + '%';
+  document.getElementById('season-progress').style.background = ['#4a7838','#909040','#a07030','#6080a0'][s];
+}
+
+function initSeasonParticles() {
+  seasonParticles.length = 0;
+  var s = getSeason();
+  if (s === 3) { // Winter — snow
+    for (var i = 0; i < 30; i++) {
+      seasonParticles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: 0.4 + Math.random() * 0.4,
+        r: 1 + Math.random(),
+        opacity: 0.4 + Math.random() * 0.3,
+        type: 'snow', angle: 0, spin: 0
+      });
+    }
+  } else if (s === 2) { // Autumn — leaves
+    for (var j = 0; j < 15; j++) {
+      seasonParticles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: 0.6 + Math.random() * 0.5,
+        r: 2.5,
+        opacity: 0.5 + Math.random() * 0.3,
+        type: 'leaf',
+        angle: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 0.05,
+        color: ['#c08030','#a06020','#d09040','#8a5018'][Math.floor(Math.random() * 4)]
+      });
+    }
+  }
+}
+
+function updateSeasonParticles() {
+  if (speed === 0) return;
+  var s = getSeason();
+  // Re-init if season changed and particles are from wrong season
+  var wrongType = (s === 3 && seasonParticles.length > 0 && seasonParticles[0].type !== 'snow') ||
+                  (s === 2 && seasonParticles.length > 0 && seasonParticles[0].type !== 'leaf') ||
+                  ((s === 0 || s === 1) && seasonParticles.length > 0);
+  if (wrongType || (seasonParticles.length === 0 && (s === 2 || s === 3))) {
+    initSeasonParticles();
+    return;
+  }
+  for (var i = 0; i < seasonParticles.length; i++) {
+    var p = seasonParticles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.angle += p.spin || 0;
+    // Wrap around screen
+    if (p.y > canvas.height + 10) p.y = -10;
+    if (p.x < -10) p.x = canvas.width + 10;
+    if (p.x > canvas.width + 10) p.x = -10;
+  }
+}
+
+function drawSeasonParticles() {
+  var s = getSeason();
+  var sp = getSeasonProgress();
+  var fadeIn = Math.min(1, sp / (2/DAYS_PER_SEASON));
+  var fadeOut = Math.min(1, (1 - sp) / (2/DAYS_PER_SEASON));
+  var alpha = (sp < (2/DAYS_PER_SEASON)) ? fadeIn : (sp > (1 - 2/DAYS_PER_SEASON) ? fadeOut : 1);
+
+  for (var i = 0; i < seasonParticles.length; i++) {
+    var p = seasonParticles[i];
+    var a = p.opacity * alpha;
+    if (a < 0.01) continue;
+    ctx.save();
+    if (p.type === 'snow') {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(220,235,248,' + a.toFixed(2) + ')';
+      ctx.fill();
+    } else { // leaf
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle);
+      var hexA = Math.round(a * 255).toString(16).padStart(2,'0');
+      ctx.fillStyle = (p.color || '#c08030') + hexA; // #rrggbbaa — valid in Chrome
+      ctx.fillRect(-p.r, -p.r * 0.6, p.r * 2, p.r * 1.2);
+    }
+    ctx.restore();
+  }
+}
+
+function updateResourceDisplay() {
+  var el = document.getElementById('resources');
+  var html = '';
+  var show = ['wood','planks','stone','grain','flour','bread','fish','water','meat','ironore','coal','goldore','iron','tools','coins'];
+  for (var i = 0; i < show.length; i++) {
+    var r = show[i];
+    var icons = {wood:'🪵',planks:'🪓',stone:'🪨',grain:'🌾',flour:'🫘',bread:'🍞',fish:'🐟',water:'💧',meat:'🥩',ironore:'⛏',coal:'◼',goldore:'✦',iron:'🔩',tools:'🔧',coins:'🪙'};
+    // Only show mining resources once they've been discovered (or a mine exists)
+    if (['ironore','coal','goldore','iron','tools','coins'].indexOf(r) !== -1 && (resources[r] || 0) === 0) {
+      var hasMineBuilding = buildings.some(function(b) { return BLDG[b.type] && (BLDG[b.type].category === 'mine' || BLDG[b.type].produces === r || BLDG[b.type].needs === r || BLDG[b.type].needs2 === r); });
+      if (!hasMineBuilding) continue;
+    }
+    var displayNames = {ironore:'iron ore', goldore:'gold ore'};
+    html += '<div class="res"><span class="icon">' + (icons[r]||'📦') + '</span><span class="val">' + (resources[r]||0) + '</span> ' + (displayNames[r] || r) + '</div>';
+  }
+  // Population and happiness
+  var avail = getAvailableWorkers();
+  var hMood = population.happiness;
+  var moodIcon = hMood >= 70 ? '😊' : (hMood >= 40 ? '😐' : '😟');
+  var moodColor = hMood >= 70 ? '#6aaa50' : (hMood >= 40 ? '#c0a040' : '#c05050');
+  var hMul = getHappinessMultiplier();
+  var mulStr = hMul !== 1.0 ? ' <span style="color:' + (hMul > 1 ? '#6a9a50' : '#c05050') + '">(' + (hMul > 1 ? '+' : '') + Math.round((hMul - 1) * 100) + '% speed)</span>' : '';
+  html += '<div class="res" style="grid-column:1/-1;border-top:1px solid #1a2a40;margin-top:4px;padding-top:4px">';
+  html += '<span class="icon">👥</span><span class="val">' + population.employed + '/' + population.capacity + '</span> pop';
+  html += ' <span style="color:#506878;margin-left:4px">' + avail + ' free</span></div>';
+  html += '<div class="res" style="grid-column:1/-1">';
+  html += '<span class="icon">' + moodIcon + '</span><span class="val" style="color:' + moodColor + '">' + hMood + '%</span> happiness' + mulStr + '</div>';
+  var foodRate = Math.ceil(population.employed / 3);
+  html += '<div class="res" style="grid-column:1/-1"><span class="icon">🍽</span><span style="color:#506878">eats ' + foodRate + ' food/cycle</span></div>';
+  el.innerHTML = html;
+}
+
+function updateEconomy() {
+  var el = document.getElementById('economy');
+  if (!el) return;
+  var counts = {};
+  var working = {};
+  var constructing = 0;
+  for (var i = 0; i < buildings.length; i++) {
+    var b = buildings[i];
+    if (b.type === 'hq') continue;
+    counts[b.type] = (counts[b.type] || 0) + 1;
+    if (!b.built) constructing++;
+    else if (b.working) working[b.type] = (working[b.type] || 0) + 1;
+  }
+  var lines = [];
+  if (constructing > 0) lines.push('🏗 ' + constructing + ' building...');
+  var typeNames = {woodcutter:'🪵', forester:'🌱', sawmill:'🪓', quarry:'⛏', farm:'🌾', mill:'⚙', bakery:'🍞', fisher:'🐟', well:'💧', hunter:'🏹', ironmine:'⛏', coalmine:'◼', goldmine:'✦', smelter:'🔥', toolmaker:'🔧', mint:'🪙', guard:'🛡', cottage:'🏠', house:'🏘', tavern:'🍺'};
+  for (var t in counts) {
+    var icon = typeNames[t] || '🏠';
+    var w = working[t] || 0;
+    var c = counts[t];
+    var status = w === c ? '<span style="color:#6a9a50">✓</span>' : (w > 0 ? '<span style="color:#c0a040">' + w + '/' + c + '</span>' : '<span style="color:#8a4040">idle</span>');
+    lines.push(icon + ' ' + BLDG[t].name + ' ×' + c + ' ' + status);
+  }
+  lines.push('🦌 ' + animals.length + ' wildlife · 🛤 ' + roads.length + ' roads');
+  el.innerHTML = lines.join('<br>');
+}
+
+function buildBuildingPanel() {
+  var el = document.getElementById('buildings');
+  var html = '';
+  var categories = {gather:'Resource', mine:'Mining', process:'Processing', military:'Military', housing:'Housing'};
+  var lastCat = '';
+  var types = Object.keys(BLDG);
+  for (var i = 0; i < types.length; i++) {
+    var type = types[i];
+    if (type === 'hq') continue;
+    var def = BLDG[type];
+    if (def.category !== lastCat) {
+      lastCat = def.category;
+      html += '<div style="color:#4a6a80;font-size:9px;letter-spacing:1.5px;padding:6px 2px 3px;border-bottom:1px solid #1a2a40;margin-bottom:4px">' + (categories[def.category] || def.category).toUpperCase() + '</div>';
+    }
+    var costStr = Object.keys(def.cost).map(function(r) { return def.cost[r] + ' ' + r; }).join(', ') || 'Free';
+    var canAfford = true;
+    for (var r in def.cost) {
+      if ((resources[r] || 0) < def.cost[r]) canAfford = false;
+    }
+    html += '<button class="bldg-btn' + (selectedBuilding === type ? ' selected' : '') + '" onclick="selectBuilding(\'' + type + '\')" ' + (canAfford ? '' : 'style="opacity:0.4"') + '>';
+    html += '<div class="name">' + def.name + '</div>';
+    html += '<div class="cost">' + costStr + '</div>';
+    html += '<div class="desc">' + def.desc + '</div>';
+    html += '</button>';
+  }
+  // Stats
+  html += '<div style="color:#4a6a80;font-size:9px;letter-spacing:1.5px;padding:6px 2px 3px;border-top:1px solid #1a2a40;margin-top:8px">STATS</div>';
+  html += '<div style="font-size:10px;color:#6a8aa0;padding:2px">' + buildings.length + ' buildings · ' + carriers.length + ' carriers · ' + flags.length + ' flags</div>';
+  el.innerHTML = html;
+}
+
+function selectBuilding(type) {
+  selectedBuilding = (selectedBuilding === type) ? null : type;
+  mode = 'build';
+  updateModeButtons();
+  buildBuildingPanel();
+}
+
+function setMode(m) {
+  mode = m;
+  if (m !== 'build') selectedBuilding = null;
+  roadStart = null;
+  updateModeButtons();
+  buildBuildingPanel();
+
+  var infoText = {
+    build: 'Click map to place buildings · Right-click to cancel',
+    road: 'Click a flag to start · Click another flag to connect · Right-click to cancel',
+    demolish: 'Click a building or flag to remove it'
+  };
+  document.getElementById('info').textContent = infoText[m] || '';
+}
+
+function updateModeButtons() {
+  document.getElementById('btn-build').classList.toggle('active', mode === 'build');
+  document.getElementById('btn-road').classList.toggle('active', mode === 'road');
+  document.getElementById('btn-demolish').classList.toggle('active', mode === 'demolish');
+}
+
+function setSpeed(s) {
+  speed = s;
+  document.getElementById('sp0').classList.toggle('active', s === 0);
+  document.getElementById('sp1').classList.toggle('active', s === 1);
+  document.getElementById('sp2').classList.toggle('active', s === 2);
+  document.getElementById('sp4').classList.toggle('active', s === 4);
+}
+
+// ===== TOOLTIP =====
+function showTooltip(x, y, title, lines) {
+  var tt = document.getElementById('tooltip');
+  tt.style.display = 'block';
+  tt.style.left = (x + 16) + 'px';
+  tt.style.top = (y + 16) + 'px';
+  var html = '<div class="tt-title">' + title + '</div>';
+  for (var i = 0; i < lines.length; i++) {
+    html += '<div class="tt-line">' + lines[i] + '</div>';
+  }
+  tt.innerHTML = html;
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// ===== INPUT =====
+function canvasX(e) { return e.clientX - 220; }
+function canvasY(e) { return e.clientY; }
+
+canvas.addEventListener('mousedown', function(e) {
+  if (e.button === 2) {
+    selectedBuilding = null;
+    roadStart = null;
+    buildBuildingPanel();
+    return;
+  }
+  if (e.button === 0) {
+    dragging = true;
+    dragStart = {x: e.clientX, y: e.clientY};
+    camStart = {x: cam.x, y: cam.y};
+  }
+});
+
+canvas.addEventListener('mousemove', function(e) {
+  if (dragging) {
+    var dx = e.clientX - dragStart.x;
+    var dy = e.clientY - dragStart.y;
+    cam.x = camStart.x + dx;
+    cam.y = camStart.y + dy;
+  }
+
+  var tile = screenToTile(canvasX(e), canvasY(e));
+  hoverTile = tile;
+
+  // Tooltip for buildings
+  var b = getBuildingAt(tile.tx, tile.ty);
+  if (b) {
+    var def = BLDG[b.type];
+    var lines = [];
+    if (!b.built) {
+      var needsList = [];
+      for (var mr3 in b.materialsNeeded) {
+        if (b.materialsNeeded[mr3] > 0) needsList.push(b.materialsNeeded[mr3] + ' ' + mr3);
+      }
+      if (needsList.length > 0) {
+        lines.push('Awaiting: ' + needsList.join(', '));
+      } else {
+        lines.push('Building... ' + Math.floor(b.progress * 100) + '%');
+      }
+    }
+    else {
+      if (def.housing) {
+        lines.push('Houses ' + def.housing + ' villagers');
+      } else if (b.type === 'tavern') {
+        lines.push(b.working ? 'Serving drinks!' : 'Needs bread');
+      } else {
+        lines.push(b.working ? 'Working' : 'Idle');
+      }
+      if (def.produces) lines.push('Produces: ' + def.produces);
+      if (def.needs) lines.push('Needs: ' + def.needs + (def.needs2 ? ' + ' + def.needs2 : ''));
+      var stored = Object.keys(b.storage).filter(function(k) { return b.storage[k] > 0; });
+      if (stored.length > 0) {
+        lines.push('Storage: ' + stored.map(function(k) { return b.storage[k] + ' ' + k; }).join(', '));
+      }
+    }
+    showTooltip(e.clientX, e.clientY, def.name, lines);
+  } else {
+    var f = getFlagAt(tile.tx, tile.ty);
+    if (f) {
+      var flagOwner = getBuildingForFlag(f.tx, f.ty);
+      var flagTitle = flagOwner ? BLDG[flagOwner.type].name + ' Flag' : 'Flag';
+      showTooltip(e.clientX, e.clientY, flagTitle, [f.items.length + '/8 items' + (f.items.length > 0 ? ': ' + f.items.join(', ') : '')]);
+    } else {
+      // Show mineral info for mountain tiles
+      var ti2 = tile.ty * MAP_W + tile.tx;
+      if (tile.tx >= 0 && tile.tx < MAP_W && tile.ty >= 0 && tile.ty < MAP_H && terrain[ti2] === TERRAIN.MOUNTAIN && minerals[ti2] !== MINERAL.NONE) {
+        var mNames = {1:'Iron Deposit', 2:'Coal Deposit', 3:'Gold Deposit'};
+        showTooltip(e.clientX, e.clientY, mNames[minerals[ti2]], ['Mountain tile with mineral vein']);
+      } else {
+        hideTooltip();
+      }
+    }
+  }
+});
+
+canvas.addEventListener('mouseup', function(e) {
+  if (e.button !== 0) return;
+  var moved = Math.abs(e.clientX - dragStart.x) + Math.abs(e.clientY - dragStart.y);
+  dragging = false;
+
+  if (moved > 5) return; // was a pan, not a click
+
+  var tile = screenToTile(canvasX(e), canvasY(e));
+
+  if (mode === 'build' && selectedBuilding) {
+    if (placeBuilding(selectedBuilding, tile.tx, tile.ty)) {
+      buildBuildingPanel(); // refresh costs
+    }
+  } else if (mode === 'road') {
+    var flag = getFlagAt(tile.tx, tile.ty);
+    if (!flag) {
+      // Place a new flag here
+      if (placeFlag(tile.tx, tile.ty)) {
+        flag = getFlagAt(tile.tx, tile.ty);
+      }
+    }
+    if (flag) {
+      if (!roadStart) {
+        roadStart = flag;
+        document.getElementById('info').textContent = 'Road from (' + flag.tx + ',' + flag.ty + ') · Click another flag to connect';
+      } else {
+        if (flag !== roadStart) {
+          placeRoad(roadStart, flag);
+        }
+        roadStart = null;
+        document.getElementById('info').textContent = 'Click a flag to start · Click another flag to connect';
+      }
+    }
+  } else if (mode === 'demolish') {
+    var bld = getBuildingAt(tile.tx, tile.ty);
+    if (bld && bld.type !== 'hq') {
+      buildings.splice(buildings.indexOf(bld), 1);
+    } else {
+      var fl = getFlagAt(tile.tx, tile.ty);
+      if (fl) {
+        // Remove connected roads and carriers
+        roads = roads.filter(function(r) {
+          return !(r.from.tx === fl.tx && r.from.ty === fl.ty) && !(r.to.tx === fl.tx && r.to.ty === fl.ty);
+        });
+        carriers = carriers.filter(function(cr) {
+          return !(cr.roadFrom.tx === fl.tx && cr.roadFrom.ty === fl.ty) && !(cr.roadTo.tx === fl.tx && cr.roadTo.ty === fl.ty);
+        });
+        flags.splice(flags.indexOf(fl), 1);
+      }
+    }
+  }
+});
+
+canvas.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  var oldZoom = cam.zoom;
+  cam.zoom *= e.deltaY > 0 ? 0.9 : 1.1;
+  cam.zoom = Math.max(0.3, Math.min(3, cam.zoom));
+
+  // Zoom toward mouse
+  var mx = canvasX(e), my = canvasY(e);
+  cam.x = mx - (mx - cam.x) * (cam.zoom / oldZoom);
+  cam.y = my - (my - cam.y) * (cam.zoom / oldZoom);
+});
+
+canvas.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+// Help overlay
+var helpVisible = false;
+function toggleHelp() {
+  helpVisible = !helpVisible;
+  var el = document.getElementById('help-overlay');
+  if (el) { el.style.display = helpVisible ? 'flex' : 'none'; return; }
+  el = document.createElement('div');
+  el.id = 'help-overlay';
+  el.style.cssText = 'position:fixed;top:0;left:220px;right:0;bottom:0;background:rgba(5,10,20,0.92);z-index:50;display:flex;align-items:center;justify-content:center;cursor:pointer';
+  el.onclick = toggleHelp;
+  el.innerHTML = '<div style="max-width:550px;color:#a0c0e0;font-size:13px;line-height:1.7;padding:30px">' +
+    '<h2 style="color:#6a9ac0;font-size:20px;margin-bottom:16px;letter-spacing:2px">SETTLERS — HOW TO PLAY</h2>' +
+    '<p style="color:#7a9ab0;margin-bottom:12px">Inspired by The Settlers 2 (Blue Byte, 1996)</p>' +
+    '<h3 style="color:#8ac0ff;font-size:13px;margin:12px 0 4px">Getting Started</h3>' +
+    '<p>1. Select <b>Woodcutter</b> from the sidebar and place it near trees<br>' +
+    '2. Switch to <b>Road mode (R)</b> and connect the building\'s flag to the HQ flag<br>' +
+    '3. Construction materials will be delivered — buildings need their cost in materials before they can be built!<br>' +
+    '4. Once built, a carrier will start moving wood to the HQ<br>' +
+    '5. Build a <b>Sawmill</b> to turn wood into planks<br>' +
+    '6. Connect it with roads and watch the production chain work!</p>' +
+    '<h3 style="color:#8ac0ff;font-size:13px;margin:12px 0 4px">Production Chains</h3>' +
+    '<p>🪵 Trees → <b>Woodcutter</b> → wood → <b>Sawmill</b> → planks<br>' +
+    '🌾 <b>Farm</b> → grain → <b>Mill</b> → flour + <b>Well</b> → water → <b>Bakery</b> → bread<br>' +
+    '🪨 Stone deposits → <b>Quarry</b> → stone<br>' +
+    '🐟 Water → <b>Fisher</b> → fish &nbsp; 🥩 Forest → <b>Hunter</b> → meat<br>' +
+    '⛏ Mountain iron → <b>Iron Mine</b> → ore + Mountain coal → <b>Coal Mine</b> → coal → <b>Smelter</b> → iron<br>' +
+    '🔧 Iron + planks → <b>Toolmaker</b> → tools &nbsp; ✦ Gold + coal → <b>Mint</b> → coins</p>' +
+    '<h3 style="color:#8ac0ff;font-size:13px;margin:12px 0 4px">Population & Happiness</h3>' +
+    '<p>Your HQ houses 10 villagers. Build <b>Cottages</b> (+4) and <b>Houses</b> (+8) for more!<br>' +
+    'Each working building needs 1 worker — can\'t build without free population.<br>' +
+    'Workers eat bread, fish, or meat (1 food per 3 workers per cycle).<br>' +
+    '<b>Happiness</b> depends on food, housing, taverns, and coins.<br>' +
+    'Happy villagers work faster (up to +30%). Unhappy ones slow down (-30%).<br>' +
+    'Build a <b>Tavern</b> (serves bread) to boost morale!</p>' +
+    '<h3 style="color:#8ac0ff;font-size:13px;margin:12px 0 4px">Controls</h3>' +
+    '<h3 style="color:#8ac0ff;font-size:13px;margin:12px 0 4px">Day/Night</h3>' +
+    '<p>Time passes as you play — watch dawn, day, dusk, and night cycle over your village.<br>' +
+    'Buildings glow warm at night. Stars appear in the sky. ~4 minutes per day at 1× speed.</p>' +
+    '<h3 style="color:#8ac0ff;font-size:13px;margin:12px 0 4px">Controls</h3>' +
+    '<p><b>B</b> Build mode · <b>R</b> Road mode · <b>D</b> Demolish · <b>1-4</b> Speed<br>' +
+    'Scroll to zoom · Drag to pan · Right-click to cancel<br>' +
+    '<b>Ctrl+S</b> Save · <b>Ctrl+L</b> Load · Auto-saves every 60s<br>' +
+    '<b>M</b> Toggle music · <b>H</b> This help · <b>Guardhouse</b> expands territory</p>' +
+    '<p style="color:#4a6a80;margin-top:16px;font-size:11px">Click anywhere to close</p>' +
+    '</div>';
+  document.body.appendChild(el);
+}
+
+// Keyboard
+document.addEventListener('keydown', function(e) {
+  if (e.code === 'Digit1') setSpeed(0);
+  if (e.code === 'Digit2') setSpeed(1);
+  if (e.code === 'Digit3') setSpeed(2);
+  if (e.code === 'Digit4') setSpeed(4);
+  if (e.code === 'KeyB') setMode('build');
+  if (e.code === 'KeyR') setMode('road');
+  if (e.code === 'KeyD') setMode('demolish');
+  if (e.code === 'KeyH') toggleHelp();
+  if (e.code === 'KeyM') toggleMusic();
+  if (e.code === 'KeyS' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveGame(); }
+  if (e.code === 'KeyL' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); loadGame(); }
+  if (e.code === 'Escape') { selectedBuilding = null; roadStart = null; helpVisible && toggleHelp(); buildBuildingPanel(); }
+});
+
+// ===== MINIMAP =====
+var minimapSize = 140;
+var mmCanvas = null, mmCtx = null;
+function initMinimap() {
+  mmCanvas = document.createElement('canvas');
+  mmCanvas.width = minimapSize;
+  mmCanvas.height = minimapSize;
+  mmCtx = mmCanvas.getContext('2d');
+}
+initMinimap();
+
+var mmDirty = true;
+var mmTimer = 0;
+function drawMinimap() {
+  var mx = canvas.width - minimapSize - 10;
+  var my = canvas.height - minimapSize - 10;
+
+  // Redraw minimap texture periodically
+  mmTimer++;
+  if (mmTimer % 60 === 0 || mmDirty) {
+    mmDirty = false;
+    mmCtx.fillStyle = '#1a1a2e';
+    mmCtx.fillRect(0, 0, minimapSize, minimapSize);
+    var scale = minimapSize / Math.max(MAP_W, MAP_H);
+    for (var y = 0; y < MAP_H; y++) {
+      for (var x = 0; x < MAP_W; x++) {
+        var t = terrain[y * MAP_W + x];
+        var colors = {0:'#2a4a6a', 1:'#3a6a35', 2:'#2a5a28', 3:'#6a6a68', 4:'#5a7a4a', 5:'#8a8560', 6:'#555a60'};
+        mmCtx.fillStyle = (t === 0 && riverSet.has(y * MAP_W + x)) ? '#3a6a8a' : (colors[t] || '#333');
+        mmCtx.fillRect(x * scale, y * scale, Math.ceil(scale), Math.ceil(scale));
+        // Show mineral deposits on minimap
+        var mm = minerals[y * MAP_W + x];
+        if (mm !== 0) {
+          mmCtx.fillStyle = mm === 1 ? '#a05030' : mm === 2 ? '#303030' : '#d0b030';
+          mmCtx.fillRect(x * scale, y * scale, Math.ceil(scale), Math.ceil(scale));
+        }
+      }
+    }
+    // Draw buildings on minimap
+    for (var bi = 0; bi < buildings.length; bi++) {
+      var b = buildings[bi];
+      mmCtx.fillStyle = b.type === 'hq' ? '#ff0' : '#f80';
+      mmCtx.fillRect(b.tx * scale - 1, b.ty * scale - 1, 3, 3);
+    }
+  }
+
+  // Draw minimap to main canvas
+  ctx.drawImage(mmCanvas, mx, my);
+
+  // Border
+  ctx.strokeStyle = '#2a3a50';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mx, my, minimapSize, minimapSize);
+
+  // Viewport rectangle
+  var scale2 = minimapSize / Math.max(MAP_W, MAP_H);
+  var vpLeft = screenToTile(0, canvas.height / 2);
+  var vpRight = screenToTile(canvas.width, canvas.height / 2);
+  var vpTop = screenToTile(canvas.width / 2, 0);
+  var vpBot = screenToTile(canvas.width / 2, canvas.height);
+  ctx.strokeStyle = 'rgba(200,200,255,0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(
+    mx + Math.max(0, vpTop.tx) * scale2,
+    my + Math.max(0, vpLeft.ty) * scale2,
+    Math.min(MAP_W, vpRight.tx - vpLeft.tx) * scale2,
+    Math.min(MAP_H, vpBot.ty - vpTop.ty) * scale2
+  );
+}
+
+// ===== RENDER LOOP =====
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw terrain
+  // Determine visible tile range for culling
+  var topLeft = screenToTile(0, 0);
+  var botRight = screenToTile(canvas.width, canvas.height);
+  var minTx = Math.max(0, topLeft.tx - 5);
+  var minTy = Math.max(0, topLeft.ty - 5);
+  var maxTx = Math.min(MAP_W - 1, botRight.tx + 5);
+  var maxTy = Math.min(MAP_H - 1, botRight.ty + 5);
+
+  // Draw in iso order (back to front)
+  for (var y = 0; y < MAP_H; y++) {
+    for (var x = 0; x < MAP_W; x++) {
+      drawTile(x, y);
+    }
+  }
+
+  // Draw trees and stones on terrain
+  for (var y2 = 0; y2 < MAP_H; y2++) {
+    for (var x2 = 0; x2 < MAP_W; x2++) {
+      var ti = y2 * MAP_W + x2;
+      if (terrain[ti] === TERRAIN.FOREST) drawTree(x2, y2);
+      else if (terrain[ti] === TERRAIN.STONE) drawStone(x2, y2);
+      if (terrain[ti] === TERRAIN.MOUNTAIN && minerals[ti] !== MINERAL.NONE) drawMineral(x2, y2);
+    }
+  }
+
+  // Draw roads
+  for (var ri = 0; ri < roads.length; ri++) {
+    drawRoad(roads[ri]);
+  }
+
+  // Draw flags
+  for (var fi = 0; fi < flags.length; fi++) {
+    drawFlag(flags[fi]);
+  }
+
+  // Draw buildings (sorted by y for correct overlap)
+  var sortedBuildings = buildings.slice().sort(function(a, b) { return (a.ty + a.tx) - (b.ty + b.tx); });
+  for (var bi = 0; bi < sortedBuildings.length; bi++) {
+    drawBuilding(sortedBuildings[bi]);
+  }
+
+  // Draw carriers
+  for (var ci = 0; ci < carriers.length; ci++) {
+    drawCarrier(carriers[ci]);
+  }
+
+  // Draw animals
+  for (var ai3 = 0; ai3 < animals.length; ai3++) {
+    var an = animals[ai3];
+    var aIso = tileToIso(an.tx, an.ty);
+    var aS = worldToScreen(aIso.x, aIso.y);
+    if (aS.x < -30 || aS.x > canvas.width + 30 || aS.y < -30 || aS.y > canvas.height + 30) continue;
+    var az = cam.zoom;
+    if (az < 0.4) continue; // too far to see
+    if (an.type === 'deer') {
+      // Brown body
+      var bounce = Math.sin(an.phase) * 0.5 * az;
+      ctx.fillStyle = '#8a6a40';
+      ctx.fillRect(aS.x - 3 * az, aS.y - 4 * az + bounce, 6 * az, 3 * az);
+      // Head
+      ctx.fillStyle = '#9a7a50';
+      ctx.fillRect(aS.x + 2 * az, aS.y - 6 * az + bounce, 2.5 * az, 2.5 * az);
+      // Antlers (small v shapes)
+      ctx.strokeStyle = '#6a5030';
+      ctx.lineWidth = 0.8 * az;
+      ctx.beginPath();
+      ctx.moveTo(aS.x + 3 * az, aS.y - 6.5 * az + bounce);
+      ctx.lineTo(aS.x + 2 * az, aS.y - 9 * az + bounce);
+      ctx.moveTo(aS.x + 3.5 * az, aS.y - 6.5 * az + bounce);
+      ctx.lineTo(aS.x + 5 * az, aS.y - 9 * az + bounce);
+      ctx.stroke();
+      // Legs
+      ctx.strokeStyle = '#7a5a30';
+      ctx.lineWidth = 0.7 * az;
+      var legSwing = Math.sin(an.phase * 2) * 1.5 * az;
+      ctx.beginPath();
+      ctx.moveTo(aS.x - 2 * az, aS.y - 1 * az); ctx.lineTo(aS.x - 2 * az + legSwing, aS.y + 2 * az);
+      ctx.moveTo(aS.x + 2 * az, aS.y - 1 * az); ctx.lineTo(aS.x + 2 * az - legSwing, aS.y + 2 * az);
+      ctx.stroke();
+    } else {
+      // Rabbit — small and bouncy
+      var hop = Math.abs(Math.sin(an.phase * 1.5)) * 2 * az;
+      ctx.fillStyle = '#b0a080';
+      ctx.beginPath();
+      ctx.arc(aS.x, aS.y - 2 * az - hop, 2 * az, 0, Math.PI * 2);
+      ctx.fill();
+      // Ears
+      ctx.fillStyle = '#c0b090';
+      ctx.fillRect(aS.x - 1.5 * az, aS.y - 5 * az - hop, 1 * az, 2.5 * az);
+      ctx.fillRect(aS.x + 0.5 * az, aS.y - 5 * az - hop, 1 * az, 2.5 * az);
+    }
+  }
+
+  // Ambient birds
+  if (tick % 600 === 0 && Math.random() < 0.3) {
+    // Spawn a bird flock
+    var bx = Math.random() * canvas.width;
+    if (!window._birds) window._birds = [];
+    window._birds.push({x: -50, y: 30 + Math.random() * 80, vx: 0.5 + Math.random() * 0.5, count: 3 + Math.floor(Math.random() * 4), age: 0});
+  }
+  if (window._birds) {
+    ctx.fillStyle = '#2a3a50';
+    for (var bi2 = window._birds.length - 1; bi2 >= 0; bi2--) {
+      var flock = window._birds[bi2];
+      flock.x += flock.vx;
+      flock.age++;
+      if (flock.x > canvas.width + 100) { window._birds.splice(bi2, 1); continue; }
+      for (var fb = 0; fb < flock.count; fb++) {
+        var row = fb < Math.ceil(flock.count / 2) ? 0 : 1;
+        var col = row === 0 ? fb : fb - Math.ceil(flock.count / 2);
+        var bpx = flock.x + col * 12 - row * 6;
+        var bpy = flock.y + (row === 0 ? -col * 5 : col * 5) + Math.sin(flock.age * 0.08 + fb) * 3;
+        // Wing shape — small v
+        ctx.beginPath();
+        ctx.moveTo(bpx - 3, bpy - 1); ctx.lineTo(bpx, bpy + 1); ctx.lineTo(bpx + 3, bpy - 1);
+        ctx.strokeStyle = '#3a4a60';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Floating notifications
+  drawFloatingTexts();
+
+  // Placement preview
+  drawPlacementPreview();
+
+  // ===== DAY/NIGHT OVERLAY =====
+  var tod = getTimeOfDay();
+  var daylight = getDaylight(tod);
+
+  if (daylight < 0.95) {
+    // Dawn/dusk warmth factor
+    var warmth = 0;
+    if (tod > 0.18 && tod < 0.32) warmth = 1 - Math.abs(tod - 0.25) / 0.07;
+    if (tod > 0.68 && tod < 0.82) warmth = 1 - Math.abs(tod - 0.75) / 0.07;
+    warmth = Math.max(0, Math.min(1, warmth));
+
+    var nr = 10 + warmth * 170, ng = 15 + warmth * 60, nb = 45 - warmth * 25;
+    var alpha = (1 - daylight) * 0.38;
+    ctx.fillStyle = 'rgba(' + Math.floor(nr) + ',' + Math.floor(ng) + ',' + Math.floor(nb) + ',' + alpha.toFixed(3) + ')';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // Stars at night
+  if (daylight < 0.25) {
+    var starAlpha = (0.25 - daylight) / 0.25;
+    var stars = getStarPositions(50);
+    for (var si2 = 0; si2 < stars.length; si2++) {
+      var star = stars[si2];
+      var stx = star.sx * canvas.width;
+      var sty = star.sy * canvas.height;
+      var twinkle = 0.4 + 0.6 * Math.sin(tick * star.twinkleSpeed + si2 * 2.3);
+      ctx.globalAlpha = starAlpha * star.brightness * twinkle;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(stx, sty, star.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Fireflies at dusk/night near forests
+  if (daylight < 0.4) {
+    var ffIntensity = Math.min(1, (0.4 - daylight) / 0.3);
+    if (!window._fireflies) window._fireflies = [];
+    // Spawn new fireflies near forest tiles
+    if (window._fireflies.length < 25 && tick % 30 === 0) {
+      for (var ffi = 0; ffi < MAP_W * MAP_H; ffi++) {
+        if (terrain[ffi] === TERRAIN.FOREST && Math.random() < 0.003) {
+          var ffx = ffi % MAP_W, ffy = Math.floor(ffi / MAP_W);
+          var ffIso = tileToIso(ffx, ffy);
+          window._fireflies.push({
+            x: ffIso.x + (Math.random() - 0.5) * 20,
+            y: ffIso.y - 10 + (Math.random() - 0.5) * 10,
+            vx: (Math.random() - 0.5) * 0.3,
+            vy: (Math.random() - 0.5) * 0.2,
+            phase: Math.random() * Math.PI * 2,
+            life: 200 + Math.floor(Math.random() * 300)
+          });
+          break;
+        }
+      }
+    }
+    for (var ff2 = window._fireflies.length - 1; ff2 >= 0; ff2--) {
+      var ff = window._fireflies[ff2];
+      ff.x += ff.vx + Math.sin(tick * 0.02 + ff.phase) * 0.15;
+      ff.y += ff.vy + Math.cos(tick * 0.015 + ff.phase * 1.3) * 0.1;
+      ff.life--;
+      if (ff.life <= 0) { window._fireflies.splice(ff2, 1); continue; }
+      var ffS = worldToScreen(ff.x, ff.y);
+      if (ffS.x < -10 || ffS.x > canvas.width + 10 || ffS.y < -10 || ffS.y > canvas.height + 10) continue;
+      var glow = (0.3 + 0.7 * Math.sin(tick * 0.06 + ff.phase)) * ffIntensity;
+      // Outer glow
+      ctx.fillStyle = 'rgba(180,255,100,' + (glow * 0.1).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(ffS.x, ffS.y, 6 * cam.zoom, 0, Math.PI * 2);
+      ctx.fill();
+      // Core
+      ctx.fillStyle = 'rgba(200,255,120,' + (glow * 0.8).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(ffS.x, ffS.y, 1.5 * cam.zoom, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    window._fireflies = [];
+  }
+
+  // Chimney smoke from working buildings
+  if (!window._smokeParticles) window._smokeParticles = [];
+  var smokeTypes = ['bakery', 'smelter', 'sawmill', 'mill', 'toolmaker', 'mint'];
+  // Spawn new smoke
+  if (window._smokeParticles.length < 60 && tick % 8 === 0) {
+    for (var si2 = 0; si2 < buildings.length; si2++) {
+      var sb = buildings[si2];
+      if (!sb.built || !sb.working) continue;
+      if (smokeTypes.indexOf(sb.type) === -1) continue;
+      if (Math.random() > 0.3) continue;
+      var sIso = tileToIso(sb.tx, sb.ty);
+      var sDef = BLDG[sb.type];
+      var sBh = (10 + sDef.size * 5);
+      window._smokeParticles.push({
+        x: sIso.x + (Math.random() - 0.5) * 3,
+        y: sIso.y - sBh - 8 + (Math.random() - 0.5) * 2,
+        vx: (Math.random() - 0.5) * 0.15,
+        vy: -0.2 - Math.random() * 0.15,
+        size: 1.5 + Math.random() * 1.5,
+        life: 80 + Math.floor(Math.random() * 60),
+        maxLife: 80 + Math.floor(Math.random() * 60)
+      });
+      if (window._smokeParticles.length >= 60) break;
+    }
+  }
+  // Update and draw smoke
+  for (var sp2 = window._smokeParticles.length - 1; sp2 >= 0; sp2--) {
+    var sp = window._smokeParticles[sp2];
+    sp.x += sp.vx;
+    sp.y += sp.vy;
+    sp.vx += (Math.random() - 0.5) * 0.02; // drift
+    sp.size += 0.03; // expand
+    sp.life--;
+    if (sp.life <= 0) { window._smokeParticles.splice(sp2, 1); continue; }
+    var spS = worldToScreen(sp.x, sp.y);
+    if (spS.x < -20 || spS.x > canvas.width + 20 || spS.y < -20 || spS.y > canvas.height + 20) continue;
+    var fade = sp.life / sp.maxLife;
+    var alpha = fade * 0.25;
+    var grey = daylight > 0.5 ? 160 : 120;
+    ctx.fillStyle = 'rgba(' + grey + ',' + grey + ',' + (grey + 10) + ',' + alpha.toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.arc(spS.x, spS.y, sp.size * cam.zoom, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Window glow at night
+  if (daylight < 0.55) {
+    var glowIntensity = Math.min(1, (0.55 - daylight) / 0.4);
+    for (var wi = 0; wi < buildings.length; wi++) {
+      var wb = buildings[wi];
+      if (!wb.built) continue;
+      var wIso = tileToIso(wb.tx, wb.ty);
+      var wS = worldToScreen(wIso.x, wIso.y);
+      if (wS.x < -50 || wS.x > canvas.width + 50 || wS.y < -50 || wS.y > canvas.height + 50) continue;
+      var wz = cam.zoom;
+      if (wz < 0.3) continue;
+      var wDef = BLDG[wb.type];
+      var wBh = (10 + wDef.size * 5) * wz;
+
+      // Warm window rectangles
+      ctx.fillStyle = 'rgba(255,210,90,' + (glowIntensity * 0.75).toFixed(2) + ')';
+      ctx.fillRect(wS.x - 4 * wz, wS.y - wBh * 0.65, 2.5 * wz, 2.5 * wz);
+      if (wDef.size >= 2) {
+        ctx.fillRect(wS.x + 2 * wz, wS.y - wBh * 0.65, 2.5 * wz, 2.5 * wz);
+      }
+
+      // Soft light pool on ground
+      ctx.fillStyle = 'rgba(255,190,70,' + (glowIntensity * 0.06).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(wS.x, wS.y + 2 * wz, 8 * wz, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Minimap
+  drawMinimap();
+  drawSeasonParticles();
+
+  // Game time display with day/night clock
+  var dayNum = Math.floor(tick / DAY_LENGTH) + 1;
+  var clockStr = getClockStr(tod);
+  var timePeriod = getTimePeriod(tod, daylight);
+  var periodColors = {Day:'#8aa060', Dawn:'#c0a050', Dusk:'#c08050', Twilight:'#7070a0', Night:'#5060a0'};
+  ctx.fillStyle = 'rgba(15,20,35,0.8)';
+  ctx.fillRect(canvas.width - 220, canvas.height - 32, 210, 24);
+  ctx.font = '11px system-ui';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = periodColors[timePeriod] || '#6a8aa0';
+  ctx.fillText(clockStr + ' ' + timePeriod, canvas.width - 110, canvas.height - 15);
+  ctx.fillStyle = '#4a6a80';
+  ctx.fillText('Day ' + dayNum, canvas.width - 16, canvas.height - 15);
+  // Music indicator
+  if (musicEnabled) {
+    ctx.fillStyle = '#6a9a6a';
+    ctx.fillText('\u266B', canvas.width - 225, canvas.height - 15);
+  }
+  ctx.textAlign = 'left';
+
+  // Dynamic background color
+  var bgR = Math.floor(26 - (1 - daylight) * 12);
+  var bgG = Math.floor(26 - (1 - daylight) * 10);
+  var bgB = Math.floor(46 - (1 - daylight) * 10);
+  document.body.style.background = 'rgb(' + bgR + ',' + bgG + ',' + bgB + ')';
+
+  simulate();
+
+  // Season change notification
+  if (_lastNotifiedSeason !== -1 && getSeason() !== _lastNotifiedSeason) {
+    _lastNotifiedSeason = getSeason();
+    var msgs = ['🌿 Spring — the fields wake','☀️ Summer — peak growing season','🍂 Autumn — harvest time','❄️ Winter — farms lie dormant'];
+    var notifyPos = tileToIso(Math.floor(MAP_W / 2), Math.floor(MAP_H / 2));
+    floatingTexts.push({x: notifyPos.x, y: notifyPos.y, text: msgs[getSeason()], color: ['#6a9058','#a09040','#a07030','#7090b0'][getSeason()], life: 200, maxLife: 200});
+    updateSeasonBadge();
+  } // end season change notification
+
+  // Refresh UI periodically
+  if (tick % 60 === 0) {
+    buildBuildingPanel();
+    updateResourceDisplay();
+    updateSeasonBadge();
+    mmDirty = true;
+  }
+
+  requestAnimationFrame(render);
+}
+
+// Page Visibility API
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) {
+    speed = 0;
+    if (musicEnabled) stopMusic();
+  } else {
+    setSpeed(1);
+    if (musicEnabled) startMusic();
+  }
+});
+
+function newGame() {
+  terrain.fill(0);
+  height.fill(0);
+  buildings.length = 0;
+  flags.length = 0;
+  roads.length = 0;
+  carriers.length = 0;
+  floatingTexts.length = 0;
+  territoryDirty = true;
+  resources = {wood:10, planks:8, stone:8, bread:4, grain:0, flour:0, fish:2, water:0, meat:0, ironore:0, coal:0, goldore:0, iron:0, tools:0, coins:0};
+  tick = Math.floor(DAY_LENGTH * 0.3); // Start at ~7am
+  _lastNotifiedSeason = getSeason(); // Spring (0) — no toast on new game
+  seasonParticles.length = 0;
+  gameTime = 0;
+  mmDirty = true;
+  generateMap();
+  buildBuildingPanel();
+  updateResourceDisplay();
+  updateEconomy();
+  updateSeasonBadge();
+}
+
+// ===== NEW GAME CONFIRM =====
+var newGamePending = false;
+function newGameConfirm() {
+  if (buildings.length <= 1) { newGame(); return; }
+  // Double-click to confirm
+  if (newGamePending) { newGame(); newGamePending = false; return; }
+  newGamePending = true;
+  var el = document.getElementById('save-status');
+  el.textContent = 'Click again to confirm';
+  el.style.color = '#c08050';
+  setTimeout(function() { newGamePending = false; el.textContent = ''; }, 3000);
+}
+
+// ===== SAVE / LOAD =====
+var SAVE_KEY = 'settlers_save_v3'; // v3: population & happiness (was v2: 80x80 map)
+var autoSaveInterval = 60000; // 60 seconds
+
+function saveGame() {
+  try {
+    var state = {
+      version: 3,
+      tick: tick,
+      gameTime: gameTime,
+      cam: {x: cam.x, y: cam.y, zoom: cam.zoom},
+      resources: JSON.parse(JSON.stringify(resources)),
+      terrain: Array.from(terrain),
+      minerals: Array.from(minerals),
+      height: Array.from(height),
+      buildings: buildings.map(function(b) {
+        return {
+          type: b.type, tx: b.tx, ty: b.ty,
+          built: b.built, progress: b.progress,
+          materialsNeeded: JSON.parse(JSON.stringify(b.materialsNeeded || {})),
+          materialsTotal: JSON.parse(JSON.stringify(b.materialsTotal || {})),
+          working: b.working, cooldown: b.cooldown,
+          storage: JSON.parse(JSON.stringify(b.storage || {})),
+          workerOut: b.workerOut || false
+        };
+      }),
+      flags: flags.map(function(f) {
+        return {tx: f.tx, ty: f.ty, items: f.items.slice()};
+      }),
+      roads: roads.map(function(r) {
+        return {from: {tx: r.from.tx, ty: r.from.ty}, to: {tx: r.to.tx, ty: r.to.ty}};
+      }),
+      carriers: carriers.map(function(c) {
+        return {
+          tx: c.tx, ty: c.ty,
+          targetTx: c.targetTx, targetTy: c.targetTy,
+          carrying: c.carrying, state: c.state,
+          moveProgress: c.moveProgress, moveSpeed: c.moveSpeed,
+          waitTimer: c.waitTimer,
+          roadFrom: c.roadFrom ? {tx: c.roadFrom.tx, ty: c.roadFrom.ty} : null,
+          roadTo: c.roadTo ? {tx: c.roadTo.tx, ty: c.roadTo.ty} : null
+        };
+      }),
+      animals: animals.map(function(a) {
+        return {tx: a.tx, ty: a.ty, type: a.type, dir: a.dir, timer: a.timer, phase: a.phase || 0};
+      }),
+      population: {capacity: population.capacity, employed: population.employed, happiness: population.happiness},
+      savedAt: new Date().toISOString()
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+    var el = document.getElementById('save-status');
+    el.textContent = 'Saved!';
+    el.style.color = '#6ab070';
+    setTimeout(function() { el.textContent = ''; }, 2000);
+    return true;
+  } catch(e) {
+    var el2 = document.getElementById('save-status');
+    el2.textContent = 'Error!';
+    el2.style.color = '#c05050';
+    console.error('Save failed:', e);
+    return false;
+  }
+}
+
+function loadGame() {
+  try {
+    var raw = localStorage.getItem(SAVE_KEY) || localStorage.getItem('settlers_save_v2');
+    if (!raw) {
+      var el = document.getElementById('save-status');
+      el.textContent = 'No save found';
+      el.style.color = '#a08060';
+      setTimeout(function() { el.textContent = ''; }, 2000);
+      return false;
+    }
+    var state = JSON.parse(raw);
+    if (state.version !== 2 && state.version !== 3) {
+      alert('Incompatible save version');
+      return false;
+    }
+
+    // Restore map data
+    for (var i = 0; i < MAP_W * MAP_H; i++) {
+      terrain[i] = state.terrain[i];
+      minerals[i] = state.minerals[i];
+      height[i] = state.height[i];
+    }
+
+    // Restore game state
+    tick = state.tick;
+    gameTime = state.gameTime;
+    cam.x = state.cam.x;
+    cam.y = state.cam.y;
+    cam.zoom = state.cam.zoom;
+    resources = state.resources;
+
+    // Restore buildings
+    buildings.length = 0;
+    for (var bi = 0; bi < state.buildings.length; bi++) {
+      var sb = state.buildings[bi];
+      var b = {
+        type: sb.type, tx: sb.tx, ty: sb.ty,
+        built: sb.built, progress: sb.progress,
+        materialsNeeded: sb.materialsNeeded || {},
+        materialsTotal: sb.materialsTotal || {},
+        working: sb.working, cooldown: sb.cooldown,
+        storage: sb.storage || {},
+        workerOut: sb.workerOut || false
+      };
+      buildings.push(b);
+    }
+
+    // Restore flags
+    flags.length = 0;
+    for (var fi = 0; fi < state.flags.length; fi++) {
+      var sf = state.flags[fi];
+      flags.push({tx: sf.tx, ty: sf.ty, items: sf.items.slice()});
+    }
+
+    // Restore roads
+    roads.length = 0;
+    for (var ri = 0; ri < state.roads.length; ri++) {
+      var sr = state.roads[ri];
+      roads.push({from: {tx: sr.from.tx, ty: sr.from.ty}, to: {tx: sr.to.tx, ty: sr.to.ty}});
+    }
+
+    // Restore carriers (re-link flag references)
+    carriers.length = 0;
+    for (var ci = 0; ci < state.carriers.length; ci++) {
+      var sc = state.carriers[ci];
+      var c = {
+        tx: sc.tx, ty: sc.ty,
+        targetTx: sc.targetTx, targetTy: sc.targetTy,
+        carrying: sc.carrying, state: sc.state,
+        moveProgress: sc.moveProgress || 0,
+        moveSpeed: sc.moveSpeed || 0.03,
+        waitTimer: sc.waitTimer || 0
+      };
+      // Re-link flag references to actual flag objects
+      if (sc.roadFrom) c.roadFrom = getFlagAt(sc.roadFrom.tx, sc.roadFrom.ty);
+      if (sc.roadTo) c.roadTo = getFlagAt(sc.roadTo.tx, sc.roadTo.ty);
+      carriers.push(c);
+    }
+
+    // Restore animals
+    animals.length = 0;
+    for (var ai = 0; ai < state.animals.length; ai++) {
+      var sa = state.animals[ai];
+      animals.push({tx: sa.tx, ty: sa.ty, type: sa.type, dir: sa.dir, timer: sa.timer, phase: sa.phase || 0});
+    }
+
+    // Restore population (v3+) or recalculate
+    if (state.population) {
+      population.capacity = state.population.capacity;
+      population.employed = state.population.employed;
+      population.happiness = state.population.happiness;
+    }
+    updatePopulation(); // always recalculate to ensure consistency
+
+    // Reconstruct riverSet from loaded terrain — inland water tiles are river
+    riverSet.clear();
+    for (var rsi = 0; rsi < MAP_W * MAP_H; rsi++) {
+      if (terrain[rsi] === TERRAIN.WATER) {
+        var rsx2 = rsi % MAP_W, rsy2 = Math.floor(rsi / MAP_W);
+        // River = water tile with at least one non-water neighbor
+        var hasLand = false;
+        for (var nd = 0; nd < 4 && !hasLand; nd++) {
+          var nnx = rsx2 + [1,-1,0,0][nd], nny = rsy2 + [0,0,1,-1][nd];
+          if (nnx >= 0 && nnx < MAP_W && nny >= 0 && nny < MAP_H && terrain[nny * MAP_W + nnx] !== TERRAIN.WATER) hasLand = true;
+        }
+        if (hasLand) riverSet.add(rsi);
+      }
+    }
+
+    // Clear transients
+    floatingTexts.length = 0;
+    territoryDirty = true;
+    mmDirty = true;
+
+    // Refresh UI
+    buildBuildingPanel();
+    updateResourceDisplay();
+    updateEconomy();
+    updateSeasonBadge();
+
+    var el2 = document.getElementById('save-status');
+    var savedDate = state.savedAt ? new Date(state.savedAt) : null;
+    var timeStr = savedDate ? savedDate.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+    el2.textContent = 'Loaded' + (timeStr ? ' (' + timeStr + ')' : '');
+    el2.style.color = '#6a90c0';
+    setTimeout(function() { el2.textContent = ''; }, 3000);
+    return true;
+  } catch(e) {
+    console.error('Load failed:', e);
+    alert('Failed to load save: ' + e.message);
+    return false;
+  }
+}
+
+function hasSavedGame() {
+  return !!localStorage.getItem(SAVE_KEY) || !!localStorage.getItem('settlers_save_v2');
+}
+
+// Auto-save every 60 seconds (only when game is running)
+setInterval(function() {
+  if (speed > 0 && buildings.length > 1) {
+    saveGame();
+    var el = document.getElementById('save-status');
+    el.textContent = 'Auto-saved';
+    el.style.color = '#4a6a50';
+    setTimeout(function() { el.textContent = ''; }, 1500);
+  }
+}, autoSaveInterval);
+
+// ===== INIT =====
+// Auto-load saved game if available, otherwise generate new map
+if (hasSavedGame()) {
+  loadGame();
+} else {
+  generateMap();
+}
+updatePopulation();
+buildBuildingPanel();
+updateResourceDisplay();
+updateEconomy();
+updateSeasonBadge();
+_lastNotifiedSeason = getSeason(); // Suppress toast on first load
+render();
+</script>
+</body>
+</html>

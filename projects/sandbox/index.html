@@ -1,0 +1,1502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sandbox — Particle Simulator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a0f;
+  color: #ccc;
+  font-family: 'Courier New', monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 12px;
+  user-select: none;
+}
+h1 {
+  font-size: 1.8em;
+  letter-spacing: 0.3em;
+  margin-bottom: 2px;
+  background: linear-gradient(90deg, #e8c170, #5b9bd5, #e07050, #70c070, #a080d0);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.subtitle { color: #555; font-size: 0.8em; margin-bottom: 12px; }
+canvas {
+  border: 1px solid #222;
+  cursor: crosshair;
+  image-rendering: pixelated;
+  background: #000;
+}
+.toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+}
+.element-btn {
+  padding: 6px 14px;
+  background: #1a1a2e;
+  border: 2px solid #333;
+  color: #ccc;
+  font-family: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.element-btn:hover { background: #2a2a3e; }
+.element-btn.active { border-color: var(--el-color); color: #fff; background: #1a1a3e; }
+.element-btn .swatch {
+  width: 12px; height: 12px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.controls button {
+  padding: 5px 14px;
+  background: #1a1a2e;
+  border: 1px solid #333;
+  color: #aaa;
+  font-family: inherit;
+  font-size: 0.85em;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.controls button:hover { background: #2a2a4e; color: #fff; }
+.controls label { display: flex; align-items: center; gap: 6px; color: #888; font-size: 0.85em; }
+.controls input[type="range"] { width: 80px; accent-color: #5b9bd5; }
+.stats { color: #444; font-size: 0.7em; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h1>SANDBOX</h1>
+<p class="subtitle">particle simulator</p>
+
+<div class="toolbar" id="toolbar"></div>
+
+<div class="controls">
+  <label>Brush
+    <input type="range" id="brushSize" min="1" max="12" value="3">
+    <span id="brushDisplay">3</span>
+  </label>
+  <button onclick="clearGrid()">Clear</button>
+  <button onclick="togglePause()">Pause</button>
+  <button id="gravBtn" onclick="toggleGravity()">Gravity: Down</button>
+</div>
+
+<canvas id="canvas"></canvas>
+<div class="stats" id="stats"></div>
+
+<script>
+// === Element definitions ===
+const EMPTY = 0;
+const ELEMENTS = {
+  sand:   { id: 1, name: 'Sand',   color: [0xe8,0xc1,0x70], type: 'powder' },
+  water:  { id: 2, name: 'Water',  color: [0x5b,0x9b,0xd5], type: 'liquid' },
+  stone:  { id: 3, name: 'Stone',  color: [0x88,0x88,0x88], type: 'solid' },
+  fire:   { id: 4, name: 'Fire',   color: [0xe0,0x50,0x20], type: 'gas', life: 30 },
+  smoke:  { id: 5, name: 'Smoke',  color: [0x60,0x60,0x60], type: 'gas', life: 80 },
+  plant:  { id: 6, name: 'Plant',  color: [0x40,0x90,0x40], type: 'solid' },
+  wood:   { id: 7, name: 'Wood',   color: [0x8b,0x65,0x14], type: 'solid' },
+  oil:    { id: 8, name: 'Oil',    color: [0x40,0x30,0x10], type: 'liquid' },
+  acid:   { id: 9, name: 'Acid',   color: [0x80,0xff,0x30], type: 'liquid' },
+  lava:   { id: 10, name: 'Lava',  color: [0xff,0x40,0x00], type: 'liquid' },
+  steam:  { id: 11, name: 'Steam', color: [0xb0,0xc0,0xd0], type: 'gas', life: 120 },
+  ice:    { id: 12, name: 'Ice',   color: [0xb0,0xd8,0xf0], type: 'solid' },
+  mud:    { id: 13, name: 'Mud',   color: [0x6a,0x50,0x30], type: 'powder' },
+  glass:  { id: 14, name: 'Glass', color: [0xc0,0xe8,0xf0], type: 'solid' },
+  slime:  { id: 15, name: 'Slime', color: [0x30,0xd0,0x50], type: 'liquid' },
+  gunpowder: { id: 16, name: 'Gunpowder', color: [0x40,0x40,0x40], type: 'powder' },
+  snow:    { id: 17, name: 'Snow',    color: [0xf0,0xf4,0xff], type: 'powder' },
+  rainbow: { id: 18, name: 'Rainbow', color: [0xff,0x40,0x80], type: 'liquid' },
+  firework:{ id: 19, name: 'Firework', color: [0xff,0xd7,0x00], type: 'powder' },
+  glitter: { id: 20, name: 'Glitter', color: [0xff,0xc0,0xe0], type: 'powder' },
+  bubble:  { id: 21, name: 'Bubble',  color: [0xa0,0xd0,0xf0], type: 'gas', life: 200 },
+  magnet:  { id: 22, name: 'Magnet',  color: [0x80,0x20,0x20], type: 'solid' },
+  lightning:{ id: 23, name: 'Lightning', color: [0xff,0xff,0x80], type: 'gas', life: 8 },
+  honey:   { id: 24, name: 'Honey',  color: [0xd4,0x9b,0x20], type: 'liquid' },
+  vine:    { id: 25, name: 'Vine',   color: [0x20,0x80,0x30], type: 'solid' },
+  wax:     { id: 26, name: 'Wax',    color: [0xf0,0xe0,0xb0], type: 'solid' },
+  confetti:{ id: 27, name: 'Confetti', color: [0xff,0x60,0x90], type: 'powder' },
+  crystal: { id: 28, name: 'Crystal', color: [0x80,0xc0,0xf0], type: 'solid' },
+  tnt:     { id: 29, name: 'TNT',    color: [0xcc,0x22,0x22], type: 'solid' },
+  seed:    { id: 30, name: 'Seed',   color: [0x60,0x40,0x20], type: 'powder' },
+  portal:  { id: 31, name: 'Portal', color: [0x90,0x40,0xd0], type: 'solid' },
+  cloud:   { id: 32, name: 'Cloud', color: [0xd8,0xd8,0xe8], type: 'gas', life: 400 },
+  paint:   { id: 33, name: 'Paint', color: [0xe0,0x30,0x40], type: 'liquid' },
+  fairy:   { id: 34, name: 'Fairy Dust', color: [0xff,0xc0,0xff], type: 'powder', life: 300 },
+  moss:    { id: 35, name: 'Moss', color: [0x30,0x70,0x28], type: 'solid' },
+  soap:    { id: 36, name: 'Soap', color: [0xf0,0xf0,0xff], type: 'solid' },
+  eraser: { id: -1, name: 'Erase', color: [0x30,0x30,0x30], type: 'tool' },
+};
+
+const BY_ID = {};
+Object.entries(ELEMENTS).forEach(([key, el]) => { el.key = key; BY_ID[el.id] = el; });
+
+// === Grid ===
+const COLS = 200;
+const ROWS = 150;
+const PIXEL = 4;
+const grid = new Int8Array(COLS * ROWS);
+const life = new Uint8Array(COLS * ROWS);  // remaining life for gases
+const moved = new Uint8Array(COLS * ROWS); // already moved this frame
+let particleCount = 0;
+let paused = false;
+let gravDir = 1; // 1 = down, -1 = up
+let selectedElement = 'sand';
+let brushSize = 3;
+let mouseDown = false;
+let mouseX = 0, mouseY = 0;
+let frame = 0;
+
+// Canvas
+const canvas = document.getElementById('canvas');
+canvas.width = COLS * PIXEL;
+canvas.height = ROWS * PIXEL;
+const ctx = canvas.getContext('2d');
+const imgData = ctx.createImageData(COLS, ROWS);
+const tempCanvas = document.createElement('canvas');
+tempCanvas.width = COLS;
+tempCanvas.height = ROWS;
+const tempCtx = tempCanvas.getContext('2d');
+
+// === Helpers ===
+function idx(x, y) { return y * COLS + x; }
+function inBounds(x, y) { return x >= 0 && x < COLS && y >= 0 && y < ROWS; }
+function get(x, y) { return inBounds(x, y) ? grid[idx(x, y)] : -99; }
+function set(x, y, id, l = 0) {
+  if (!inBounds(x, y)) return;
+  const i = idx(x, y);
+  if (grid[i] === EMPTY && id !== EMPTY) particleCount++;
+  else if (grid[i] !== EMPTY && id === EMPTY) particleCount--;
+  grid[i] = id;
+  life[i] = l;
+}
+function swap(x1, y1, x2, y2) {
+  if (!inBounds(x1, y1) || !inBounds(x2, y2)) return;
+  const i1 = idx(x1, y1), i2 = idx(x2, y2);
+  [grid[i1], grid[i2]] = [grid[i2], grid[i1]];
+  [life[i1], life[i2]] = [life[i2], life[i1]];
+  moved[i2] = 1;
+}
+function isEmpty(x, y) { return get(x, y) === EMPTY; }
+function isType(x, y, type) {
+  const id = get(x, y);
+  return id > 0 && BY_ID[id] && BY_ID[id].type === type;
+}
+function isId(x, y, ...ids) { return ids.includes(get(x, y)); }
+
+// === Simulation ===
+function updateParticle(x, y) {
+  const i = idx(x, y);
+  if (moved[i]) return;
+  const id = grid[i];
+  if (id === EMPTY) return;
+  const el = BY_ID[id];
+  if (!el) return;
+
+  const down = gravDir;
+  const below = y + down;
+
+  // Life decay for gases
+  if (el.life) {
+    life[i]--;
+    if (life[i] <= 0) {
+      set(x, y, EMPTY);
+      return;
+    }
+  }
+
+  switch (el.key) {
+    case 'sand':
+      if (isEmpty(x, below)) { swap(x, y, x, below); }
+      else if (isEmpty(x - 1, below) && isEmpty(x + 1, below)) {
+        swap(x, y, Math.random() < 0.5 ? x - 1 : x + 1, below);
+      }
+      else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+      // Sink in water/oil/slime
+      else if (isId(x, below, 2, 8, 15)) { swap(x, y, x, below); }
+      // Sand + Water = Mud (chance when touching)
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        if (get(x+dx2, y+dy2) === 2 && Math.random() < 0.008) {
+          set(x, y, 13); set(x+dx2, y+dy2, 13); break;
+        }
+      }
+      // Sand + Fire/Lava = Glass (melting)
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nid = get(x+dx2, y+dy2);
+        if ((nid === 4 || nid === 10) && Math.random() < 0.03) {
+          set(x, y, 14); break;
+        }
+      }
+      break;
+
+    case 'water':
+      if (isEmpty(x, below)) { swap(x, y, x, below); }
+      else if (isEmpty(x - 1, below) && isEmpty(x + 1, below)) {
+        swap(x, y, Math.random() < 0.5 ? x - 1 : x + 1, below);
+      }
+      else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+      else {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        if (isEmpty(x + dir, y)) { swap(x, y, x + dir, y); }
+        else if (isEmpty(x - dir, y)) { swap(x, y, x - dir, y); }
+      }
+      break;
+
+    case 'oil':
+      if (isEmpty(x, below)) { swap(x, y, x, below); }
+      else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+      // Float on water
+      else if (isId(x, below, 2)) { swap(x, y, x, below); }
+      else {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        if (isEmpty(x + dir, y)) { swap(x, y, x + dir, y); }
+        else if (isEmpty(x - dir, y)) { swap(x, y, x - dir, y); }
+      }
+      break;
+
+    case 'acid':
+      if (isEmpty(x, below)) { swap(x, y, x, below); }
+      else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+      else {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        if (isEmpty(x + dir, y)) { swap(x, y, x + dir, y); }
+      }
+      // Dissolve adjacent solids and powders — with special reactions
+      for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nx = x + dx, ny = y + dy;
+        const nid = get(nx, ny);
+        if (nid === 6 && Math.random() < 0.04) {
+          // Acid + Plant = Slime
+          set(nx, ny, 15); if (Math.random() < 0.3) set(x, y, 15);
+          break;
+        } else if (nid === 12 && Math.random() < 0.06) {
+          // Acid + Ice = fizzy explosion — water + steam burst
+          set(nx, ny, 2);
+          set(x, y, 11, 80);
+          // Spawn extra steam nearby
+          for (const [dx2, dy2] of [[1,0],[-1,0],[0,-1]]) {
+            if (isEmpty(x+dx2, y+dy2)) set(x+dx2, y+dy2, 11, 60 + Math.random()*40);
+          }
+          break;
+        } else if (nid === 2 && Math.random() < 0.01) {
+          // Acid + Water = neutralise — both vanish, produce steam
+          set(nx, ny, 11, 60);
+          set(x, y, EMPTY);
+          break;
+        } else if (nid > 0 && nid !== 9 && nid !== 2 && nid !== 15 && Math.random() < 0.02) {
+          set(nx, ny, EMPTY);
+          if (Math.random() < 0.4) { set(x, y, EMPTY); }
+          break;
+        }
+      }
+      break;
+
+    case 'lava':
+      if (isEmpty(x, below)) { swap(x, y, x, below); }
+      else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+      else {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        if (isEmpty(x + dir, y)) { swap(x, y, x + dir, y); }
+      }
+      // Ignite nearby flammables, turn water to steam
+      for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nx = x + dx, ny = y + dy;
+        const nid = get(nx, ny);
+        if (nid === 2) { // water -> steam, lava -> stone
+          set(nx, ny, 11, 120);
+          if (Math.random() < 0.15) set(x, y, 3);
+          break;
+        }
+        if (nid === 12) { // ice -> water
+          set(nx, ny, 2);
+          if (Math.random() < 0.05) set(x, y, 3);
+          break;
+        }
+        if ((nid === 6 || nid === 7 || nid === 8) && Math.random() < 0.1) {
+          set(nx, ny, 4, 25 + Math.random() * 20);
+        }
+        if (nid === 1 && Math.random() < 0.05) { // sand -> glass
+          set(nx, ny, 14);
+        }
+        if (nid === 15 && Math.random() < 0.08) { // slime -> fire + smoke
+          set(nx, ny, 4, 20);
+        }
+        if (nid === 16 && Math.random() < 0.3) { // gunpowder -> big fire
+          set(nx, ny, 4, 35 + Math.random() * 20);
+        }
+      }
+      break;
+
+    case 'fire':
+      // Rise
+      if (isEmpty(x, y - down)) { swap(x, y, x, y - down); }
+      else if (isEmpty(x + (Math.random() < 0.5 ? -1 : 1), y - down)) {
+        swap(x, y, x + (Math.random() < 0.5 ? -1 : 1), y - down);
+      }
+      // Spread to flammable neighbours
+      for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nx = x + dx, ny = y + dy;
+        const nid = get(nx, ny);
+        if (nid === 6 && Math.random() < 0.03) { // plant
+          set(nx, ny, 4, 20 + Math.random() * 20);
+        } else if (nid === 7 && Math.random() < 0.015) { // wood
+          set(nx, ny, 4, 30 + Math.random() * 25);
+        } else if (nid === 8 && Math.random() < 0.08) { // oil
+          set(nx, ny, 4, 25 + Math.random() * 15);
+        } else if (nid === 16 && Math.random() < 0.5) { // gunpowder explodes!
+          set(nx, ny, 4, 30 + Math.random() * 25);
+          for (const [ex, ey] of [[0,1],[0,-1],[1,0],[-1,0],[0,-2],[0,2]]) {
+            if (isEmpty(nx+ex, ny+ey)) set(nx+ex, ny+ey, 4, 15 + Math.random() * 20);
+          }
+        } else if (nid === 15 && Math.random() < 0.06) { // slime burns
+          set(nx, ny, 4, 20 + Math.random() * 15);
+        } else if (nid === 25 && Math.random() < 0.06) { // vine burns fast
+          set(nx, ny, 4, 18 + Math.random() * 15);
+        } else if (nid === 24 && Math.random() < 0.02) { // honey caramelizes
+          set(nx, ny, 3);
+        } else if (nid === 26 && Math.random() < 0.04) { // wax melts into fire then burns
+          set(nx, ny, 4, 35 + Math.random() * 20);
+        } else if (nid === 19 && Math.random() < 0.4) { // firework ignites
+          // Handled by firework's own update
+        } else if (nid === 17 && Math.random() < 0.15) { // snow melts → water, fire goes out
+          set(nx, ny, 2);
+          set(x, y, 11, 40);
+          return;
+        } else if (nid === 2) { // water extinguishes
+          set(x, y, 11, 60);
+          return;
+        } else if (nid === 12) { // ice -> water
+          set(nx, ny, 2);
+          set(x, y, EMPTY);
+          return;
+        } else if (nid === 32) { // cloud → steam (fire evaporates cloud)
+          set(nx, ny, 11, 60);
+        } else if (nid === 33 && Math.random() < 0.1) { // paint burns
+          set(nx, ny, 4, 15 + Math.random() * 15);
+        }
+      }
+      // Chance to produce smoke
+      if (Math.random() < 0.15 && isEmpty(x, y - down)) {
+        set(x, y - down, 5, 40 + Math.random() * 60);
+      }
+      break;
+
+    case 'smoke':
+    case 'steam':
+      // Rise with drift
+      const drift = Math.random() < 0.3 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+      if (isEmpty(x + drift, y - down)) { swap(x, y, x + drift, y - down); }
+      else if (isEmpty(x, y - down)) { swap(x, y, x, y - down); }
+      else if (isEmpty(x - 1, y)) { swap(x, y, x - 1, y); }
+      else if (isEmpty(x + 1, y)) { swap(x, y, x + 1, y); }
+      // Steam condenses back to water
+      if (el.key === 'steam' && life[idx(x, y)] < 10 && Math.random() < 0.3) {
+        set(x, y, 2);
+      }
+      break;
+
+    case 'plant':
+      // Grow when touching water
+      for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nx = x + dx, ny = y + dy;
+        if (get(nx, ny) === 2 && Math.random() < 0.015) {
+          set(nx, ny, 6); // water -> plant
+        }
+      }
+      // Grow upward occasionally
+      if (Math.random() < 0.002 && isEmpty(x, y - 1)) {
+        set(x, y - 1, 6);
+      }
+      break;
+
+    case 'ice':
+      // Freeze adjacent water
+      for (const [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nx = x + dx, ny = y + dy;
+        if (get(nx, ny) === 2 && Math.random() < 0.005) {
+          set(nx, ny, 12);
+        }
+        // Ice + slime = frozen slime (becomes ice)
+        if (get(nx, ny) === 15 && Math.random() < 0.01) {
+          set(nx, ny, 12);
+        }
+      }
+      break;
+
+    case 'mud':
+      // Mud: slow-falling powder, stickier than sand
+      if (isEmpty(x, below)) {
+        if (Math.random() < 0.6) swap(x, y, x, below); // slower than sand
+      }
+      else if (isEmpty(x - 1, below) && Math.random() < 0.3) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below) && Math.random() < 0.3) { swap(x, y, x + 1, below); }
+      // Sink in water
+      else if (isId(x, below, 2)) { swap(x, y, x, below); }
+      // Mud dries near fire → sand
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        if (get(x+dx2, y+dy2) === 4 && Math.random() < 0.02) {
+          set(x, y, 1); break;
+        }
+      }
+      break;
+
+    case 'slime':
+      // Slime: slow liquid, sticks to surfaces, drips
+      if (isEmpty(x, below)) {
+        if (Math.random() < 0.4) swap(x, y, x, below); // slow drip
+      }
+      else if (isEmpty(x - 1, below) && Math.random() < 0.2) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below) && Math.random() < 0.2) { swap(x, y, x + 1, below); }
+      else {
+        // Very slow lateral spread
+        if (Math.random() < 0.1) {
+          const dir = Math.random() < 0.5 ? -1 : 1;
+          if (isEmpty(x + dir, y)) swap(x, y, x + dir, y);
+        }
+      }
+      // Slime + water = the slime spreads (absorbs water)
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        if (get(x+dx2, y+dy2) === 2 && Math.random() < 0.01) {
+          set(x+dx2, y+dy2, 15);
+        }
+      }
+      break;
+
+    case 'gunpowder':
+      // Falls like sand
+      if (isEmpty(x, below)) { swap(x, y, x, below); }
+      else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+      // Sink in liquids
+      else if (isId(x, below, 2, 8, 15)) { swap(x, y, x, below); }
+      // Ignite from fire — chain reaction explosion!
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]]) {
+        const nid = get(x+dx2, y+dy2);
+        if ((nid === 4 || nid === 10) && Math.random() < 0.4) {
+          // Explode! Turn to fire + spawn fire in empty neighbours
+          set(x, y, 4, 30 + Math.random() * 25);
+          for (const [ex, ey] of [[0,1],[0,-1],[1,0],[-1,0],[0,-2],[0,2],[-2,0],[2,0]]) {
+            if (isEmpty(x+ex, y+ey)) {
+              set(x+ex, y+ey, 4, 15 + Math.random() * 20);
+            }
+          }
+          break;
+        }
+      }
+      break;
+
+    case 'snow':
+      // Falls gently like sand but slower
+      if (isEmpty(x, below)) {
+        if (Math.random() < 0.5) swap(x, y, x, below);
+      }
+      else if (isEmpty(x - 1, below) && Math.random() < 0.4) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below) && Math.random() < 0.4) { swap(x, y, x + 1, below); }
+      // Gentle lateral drift
+      else if (Math.random() < 0.05) {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        if (isEmpty(x + dir, y)) swap(x, y, x + dir, y);
+      }
+      // Melt near fire/lava → water
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        const nid = get(x+dx2, y+dy2);
+        if ((nid === 4 || nid === 10) && Math.random() < 0.1) {
+          set(x, y, 2); break;
+        }
+      }
+      // Snow + water → ice
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        if (get(x+dx2, y+dy2) === 2 && Math.random() < 0.02) {
+          set(x+dx2, y+dy2, 12); break;
+        }
+      }
+      break;
+
+    case 'rainbow':
+      // Flows like water
+      if (isEmpty(x, below)) { swap(x, y, x, below); }
+      else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+      else {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        if (isEmpty(x + dir, y)) { swap(x, y, x + dir, y); }
+      }
+      // Turn water into more rainbow!
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        if (get(x+dx2, y+dy2) === 2 && Math.random() < 0.008) {
+          set(x+dx2, y+dy2, 18);
+        }
+      }
+      break;
+
+    case 'firework':
+      // Sits still until ignited by fire/lava, then launches upward
+      {
+        let ignited = false;
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          const nid = get(x+dx2, y+dy2);
+          if ((nid === 4 || nid === 10) && Math.random() < 0.3) {
+            ignited = true; break;
+          }
+        }
+        if (ignited) {
+          // Launch upward — clear self, spawn rising fire trail
+          set(x, y, 4, 8);
+          // Explosion burst at height
+          const burstY = y - 15 - Math.floor(Math.random() * 25);
+          const burstX = x + Math.floor((Math.random() - 0.5) * 8);
+          for (let angle = 0; angle < Math.PI * 2; angle += 0.4) {
+            const dist = 3 + Math.floor(Math.random() * 6);
+            const ex = burstX + Math.floor(Math.cos(angle) * dist);
+            const ey = burstY + Math.floor(Math.sin(angle) * dist);
+            if (isEmpty(ex, ey)) {
+              set(ex, ey, 4, 20 + Math.random() * 25);
+            }
+          }
+          // Smoke at burst point
+          for (let si = 0; si < 4; si++) {
+            const sx = burstX + Math.floor((Math.random()-0.5) * 8);
+            const sy = burstY + Math.floor((Math.random()-0.5) * 8);
+            if (isEmpty(sx, sy)) set(sx, sy, 5, 60 + Math.random() * 40);
+          }
+        } else {
+          // Falls like sand when not ignited
+          if (isEmpty(x, below)) { swap(x, y, x, below); }
+          else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+          else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+        }
+      }
+      break;
+
+    case 'glitter':
+      // Bouncy sparkly powder — falls but occasionally bounces sideways
+      if (isEmpty(x, below)) {
+        swap(x, y, x, below);
+      } else if (Math.random() < 0.3) {
+        // Bounce! Move sideways or even upward
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        if (isEmpty(x + dir, y - 1)) { swap(x, y, x + dir, y - 1); }
+        else if (isEmpty(x + dir, y)) { swap(x, y, x + dir, y); }
+      } else if (isEmpty(x - 1, below)) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below)) { swap(x, y, x + 1, below); }
+      // Near fire: glitter explodes into rainbow!
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        if (get(x+dx2, y+dy2) === 4 && Math.random() < 0.05) {
+          set(x, y, 18); break; // becomes rainbow
+        }
+      }
+      break;
+
+    case 'bubble':
+      // Rises slowly, drifts sideways, pops on contact with solids
+      {
+        const above = y - 1;
+        if (isEmpty(x, above)) {
+          if (Math.random() < 0.6) swap(x, y, x, above);
+        } else if (isEmpty(x - 1, above) && Math.random() < 0.3) {
+          swap(x, y, x - 1, above);
+        } else if (isEmpty(x + 1, above) && Math.random() < 0.3) {
+          swap(x, y, x + 1, above);
+        } else {
+          // Pop! Release a tiny splash of water
+          set(x, y, EMPTY);
+          if (isEmpty(x, y + 1)) set(x, y + 1, 2);
+          if (isEmpty(x - 1, y) && Math.random() < 0.5) set(x - 1, y, 2);
+          if (isEmpty(x + 1, y) && Math.random() < 0.5) set(x + 1, y, 2);
+          break;
+        }
+        // Gentle lateral drift
+        if (Math.random() < 0.1) {
+          const dir = Math.random() < 0.5 ? -1 : 1;
+          if (isEmpty(x + dir, y)) swap(x, y, x + dir, y);
+        }
+        // Through water: bubbles rise faster
+        if (get(x, above) === 2) {
+          swap(x, y, x, above);
+        }
+      }
+      break;
+
+    case 'magnet':
+      // Static solid that attracts nearby sand and gunpowder
+      {
+        const range = 6;
+        for (let dy2 = -range; dy2 <= range; dy2++) {
+          for (let dx2 = -range; dx2 <= range; dx2++) {
+            if (dx2 === 0 && dy2 === 0) continue;
+            const nx = x + dx2, ny = y + dy2;
+            const nid = get(nx, ny);
+            // Attract sand, gunpowder, glitter, and mud
+            if (nid === 1 || nid === 16 || nid === 20 || nid === 13) {
+              if (Math.random() < 0.03) {
+                // Move the particle one step toward magnet
+                const stepX = dx2 > 0 ? -1 : dx2 < 0 ? 1 : 0;
+                const stepY = dy2 > 0 ? -1 : dy2 < 0 ? 1 : 0;
+                const tx = nx + stepX, ty = ny + stepY;
+                if (isEmpty(tx, ty)) {
+                  swap(nx, ny, tx, ty);
+                }
+              }
+            }
+          }
+        }
+      }
+      break;
+
+    case 'lightning':
+      // Electric bolt — zaps downward fast, ignites flammables, splits
+      {
+        // Move down fast (2-3 cells)
+        let zapped = false;
+        for (let step = 1; step <= 3; step++) {
+          const zy = y + down * step;
+          const zx = x + (Math.random() < 0.4 ? (Math.random() < 0.5 ? -1 : 1) : 0);
+          if (isEmpty(zx, zy)) {
+            swap(x, y, zx, zy);
+            x = zx; y = zy;
+            zapped = true;
+          } else {
+            const nid = get(zx, zy);
+            // Ignite flammables
+            if (nid === 6 || nid === 7 || nid === 8 || nid === 16) {
+              set(zx, zy, 4, 25 + Math.random() * 20);
+            }
+            // Turn sand to glass
+            if (nid === 1) set(zx, zy, 14);
+            // Evaporate water
+            if (nid === 2) set(zx, zy, 11, 60);
+            // Melt ice
+            if (nid === 12) set(zx, zy, 2);
+            set(x, y, EMPTY);
+            zapped = true;
+            break;
+          }
+        }
+        // Fork: small chance to spawn a second bolt
+        if (Math.random() < 0.12 && life[idx(x,y)] > 3) {
+          const fdir = Math.random() < 0.5 ? -1 : 1;
+          if (isEmpty(x + fdir, y)) set(x + fdir, y, 23, life[idx(x,y)] - 2);
+        }
+      }
+      break;
+
+    case 'honey':
+      // Very viscous liquid — extremely slow, sinks under water, sticks
+      if (isEmpty(x, below)) {
+        if (Math.random() < 0.15) swap(x, y, x, below); // very slow drip
+      }
+      else if (isEmpty(x - 1, below) && Math.random() < 0.08) { swap(x, y, x - 1, below); }
+      else if (isEmpty(x + 1, below) && Math.random() < 0.08) { swap(x, y, x + 1, below); }
+      // Sink through water
+      else if (isId(x, below, 2)) { if (Math.random() < 0.3) swap(x, y, x, below); }
+      else {
+        // Very slow lateral spread
+        if (Math.random() < 0.03) {
+          const dir = Math.random() < 0.5 ? -1 : 1;
+          if (isEmpty(x + dir, y)) swap(x, y, x + dir, y);
+        }
+      }
+      // Near fire: honey caramelizes into solid
+      for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+        if (get(x+dx2, y+dy2) === 4 && Math.random() < 0.03) {
+          set(x, y, 3); break; // becomes stone (hardened)
+        }
+      }
+      break;
+
+    case 'vine':
+      // Living growing plant — grows upward and sideways, needs water nearby
+      {
+        let nearWater = false;
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0],[0,2],[0,-2]]) {
+          if (get(x+dx2, y+dy2) === 2) { nearWater = true; break; }
+        }
+        if (nearWater || Math.random() < 0.002) {
+          // Grow upward (strong tendency)
+          if (Math.random() < 0.02 && isEmpty(x, y - 1)) {
+            set(x, y - 1, 25);
+          }
+          // Grow sideways (weaker)
+          if (Math.random() < 0.008) {
+            const dir = Math.random() < 0.5 ? -1 : 1;
+            if (isEmpty(x + dir, y)) set(x + dir, y, 25);
+          }
+          // Grow diagonally upward (tendril-like)
+          if (Math.random() < 0.005) {
+            const dir = Math.random() < 0.5 ? -1 : 1;
+            if (isEmpty(x + dir, y - 1)) set(x + dir, y - 1, 25);
+          }
+          // Consume nearby water when growing
+          if (Math.random() < 0.01) {
+            for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+              if (get(x+dx2, y+dy2) === 2) { set(x+dx2, y+dy2, EMPTY); break; }
+            }
+          }
+        }
+        // Burns easily
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          if (get(x+dx2, y+dy2) === 4 && Math.random() < 0.06) {
+            set(x, y, 4, 20 + Math.random() * 15);
+            break;
+          }
+        }
+      }
+      break;
+
+    case 'wax':
+      // Solid at room temp; melts near fire/lava into liquid wax, resolidifies away from heat
+      {
+        let nearHeat = false;
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          const nid = get(x+dx2, y+dy2);
+          if ((nid === 4 || nid === 10) && Math.random() < 0.04) {
+            nearHeat = true; break;
+          }
+        }
+        if (nearHeat) {
+          // Melted wax: behave like slow liquid
+          if (isEmpty(x, below)) {
+            if (Math.random() < 0.3) swap(x, y, x, below);
+          } else if (isEmpty(x - 1, below) && Math.random() < 0.15) { swap(x, y, x - 1, below); }
+          else if (isEmpty(x + 1, below) && Math.random() < 0.15) { swap(x, y, x + 1, below); }
+          else if (Math.random() < 0.05) {
+            const dir = Math.random() < 0.5 ? -1 : 1;
+            if (isEmpty(x + dir, y)) swap(x, y, x + dir, y);
+          }
+          // Wax burns with enough heat
+          if (Math.random() < 0.01) set(x, y, 4, 30 + Math.random() * 20);
+        }
+        // Otherwise: solid, does nothing (falls only if unsupported like sand)
+        else if (isEmpty(x, below)) {
+          swap(x, y, x, below); // wax falls when melted blob cools
+        }
+      }
+      break;
+
+    case 'confetti':
+      // Colourful powder — initial upward pop, then gentle floating down
+      {
+        const age = 255 - (life[idx(x,y)] || 0);
+        if (life[idx(x,y)] > 200) {
+          // Initial pop: move upward!
+          life[idx(x,y)]--;
+          if (isEmpty(x, y - 1)) {
+            const drift2 = Math.random() < 0.4 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+            if (isEmpty(x + drift2, y - 1)) swap(x, y, x + drift2, y - 1);
+            else swap(x, y, x, y - 1);
+          } else {
+            life[idx(x,y)] = 0; // stop popping if blocked
+          }
+        } else {
+          // Float down gently with lots of drift
+          if (isEmpty(x, below)) {
+            if (Math.random() < 0.3) swap(x, y, x, below);
+          }
+          // Lots of lateral drift — confetti floats sideways
+          if (Math.random() < 0.15) {
+            const dir = Math.random() < 0.5 ? -1 : 1;
+            if (isEmpty(x + dir, y)) swap(x, y, x + dir, y);
+            else if (isEmpty(x + dir, below)) swap(x, y, x + dir, below);
+          }
+          // Occasional upward flutter
+          if (Math.random() < 0.03 && isEmpty(x, y - 1)) swap(x, y, x, y - 1);
+        }
+      }
+      break;
+
+    case 'crystal':
+      // Grows geometric structures when touching water; static otherwise
+      {
+        let nearWater2 = false;
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          if (get(x+dx2, y+dy2) === 2) { nearWater2 = true; break; }
+        }
+        if (nearWater2) {
+          // Grow in cardinal directions preferentially (geometric)
+          const dirs2 = [[0,-1],[0,1],[1,0],[-1,0]];
+          for (const [dx2, dy2] of dirs2) {
+            if (Math.random() < 0.006 && isEmpty(x+dx2, y+dy2)) {
+              set(x+dx2, y+dy2, 28);
+              // Consume water nearby
+              for (const [wx, wy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+                if (get(x+wx, y+wy) === 2 && Math.random() < 0.3) {
+                  set(x+wx, y+wy, EMPTY); break;
+                }
+              }
+              break;
+            }
+          }
+          // Diagonal growth (rarer — for branching)
+          if (Math.random() < 0.002) {
+            const dd = [[1,-1],[-1,-1],[1,1],[-1,1]];
+            const [dx2, dy2] = dd[Math.floor(Math.random() * 4)];
+            if (isEmpty(x+dx2, y+dy2)) set(x+dx2, y+dy2, 28);
+          }
+        }
+        // Crystal shatters from explosions (fire nearby with force)
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          if (get(x+dx2, y+dy2) === 4 && Math.random() < 0.008) {
+            set(x, y, 1); // shatters to sand
+            break;
+          }
+        }
+      }
+      break;
+
+    case 'tnt':
+      // TNT: explodes when fire or lava touches it, chain reaction
+      {
+        let ignite = false;
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]]) {
+          const nid2 = get(x+dx2, y+dy2);
+          if (nid2 === 4 || nid2 === 10 || nid2 === 23) { ignite = true; break; } // fire, lava, lightning
+        }
+        if (ignite) {
+          // Explode! Blast radius 8-12
+          const radius = 8 + Math.floor(Math.random() * 5);
+          for (let dy2 = -radius; dy2 <= radius; dy2++) {
+            for (let dx2 = -radius; dx2 <= radius; dx2++) {
+              if (dx2*dx2 + dy2*dy2 > radius*radius) continue;
+              const ex = x + dx2, ey = y + dy2;
+              if (ex < 0 || ex >= W || ey < 0 || ey >= H) continue;
+              const eid = get(ex, ey);
+              if (eid === EMPTY) {
+                // Fire/smoke in blast area
+                if (Math.random() < 0.4) set(ex, ey, 4); // fire
+                else if (Math.random() < 0.3) set(ex, ey, 11); // steam/smoke
+              } else if (eid !== 3 && eid !== 29) { // not stone, not more TNT (TNT ignites next frame)
+                if (Math.random() < 0.7) set(ex, ey, EMPTY);
+                else if (Math.random() < 0.3) set(ex, ey, 4); // fire
+              }
+              // TNT in blast radius will be ignited next frame by the fire we just placed
+            }
+          }
+          set(x, y, 4); // this TNT becomes fire
+        }
+      }
+      break;
+
+    case 'seed':
+      // Seed: falls like sand, then plants itself and grows upward into a plant
+      {
+        const below = get(x, y + 1);
+        if (below === EMPTY) {
+          set(x, y, EMPTY);
+          set(x, y + 1, 30);
+        } else if (below !== EMPTY && below !== 30) {
+          // Planted! Grow upward
+          const life2 = getLife(x, y);
+          if (life2 < 80) {
+            setLife(x, y, life2 + 1);
+          }
+          if (life2 > 5 && Math.random() < 0.03) {
+            // Grow plant upward
+            if (isEmpty(x, y - 1)) {
+              set(x, y - 1, 8); // plant
+              // Occasionally branch sideways
+              if (life2 > 20 && Math.random() < 0.3) {
+                const bx = Math.random() < 0.5 ? -1 : 1;
+                if (isEmpty(x + bx, y - 1)) set(x + bx, y - 1, 8);
+              }
+            }
+          }
+          // Near water accelerates growth
+          for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+            if (get(x+dx2, y+dy2) === 2 && Math.random() < 0.1) {
+              setLife(x, y, Math.min(80, life2 + 3));
+              set(x+dx2, y+dy2, EMPTY); // consume water
+              break;
+            }
+          }
+          // Fire kills seeds
+          for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+            if (get(x+dx2, y+dy2) === 4) { set(x, y, EMPTY); break; }
+          }
+        }
+      }
+      break;
+
+    case 'portal':
+      // Portal: teleports non-solid particles that touch it to the other nearest portal
+      {
+        // Find adjacent particles to teleport
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          const nid2 = get(x+dx2, y+dy2);
+          if (nid2 === EMPTY || nid2 === 31 || nid2 === 3) continue; // skip empty, portal, stone
+          const el2 = BY_ID[nid2];
+          if (!el2 || el2.type === 'solid') continue; // only teleport non-solids
+          if (Math.random() > 0.1) continue; // rate limit
+          // Find another portal
+          let found = false;
+          // Search in expanding rings (max 100 tiles)
+          for (let r2 = 5; r2 < 100 && !found; r2 += 3) {
+            for (let a = 0; a < 8 && !found; a++) {
+              const tx = x + Math.round(Math.cos(a * 0.785) * r2);
+              const ty = y + Math.round(Math.sin(a * 0.785) * r2);
+              if (tx >= 0 && tx < W && ty >= 0 && ty < H && get(tx, ty) === 31 && (tx !== x || ty !== y)) {
+                // Found another portal! Teleport particle near it
+                const exits = [[0,1],[0,-1],[1,0],[-1,0]];
+                for (const [ex2, ey2] of exits) {
+                  if (isEmpty(tx+ex2, ty+ey2)) {
+                    set(tx+ex2, ty+ey2, nid2);
+                    set(x+dx2, y+dy2, EMPTY);
+                    found = true;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      break;
+
+    case 'cloud':
+      // Cloud: rises slowly, drifts sideways, rains when surrounded by other clouds
+      {
+        const cdrift = Math.random() < 0.5 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+        if (Math.random() < 0.6) {
+          if (isEmpty(x + cdrift, y - down)) { swap(x, y, x + cdrift, y - down); }
+          else if (isEmpty(x, y - down)) { swap(x, y, x, y - down); }
+          else if (isEmpty(x - 1, y)) { swap(x, y, x - 1, y); }
+          else if (isEmpty(x + 1, y)) { swap(x, y, x + 1, y); }
+        }
+        // Condense to rain: if many clouds nearby, drop water below
+        let cloudN = 0;
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]]) {
+          if (get(x+dx2, y+dy2) === 32) cloudN++;
+        }
+        if (cloudN >= 4 && Math.random() < 0.008) {
+          for (let ry = 1; ry < 8; ry++) {
+            if (isEmpty(x, y + ry)) {
+              set(x, y + ry, 2);
+              set(x, y, EMPTY);
+              break;
+            }
+          }
+        }
+      }
+      break;
+
+    case 'paint':
+      // Paint: flows like water, spreads colour through other liquids, consumed by fire
+      {
+        if (isEmpty(x, y + down)) { swap(x, y, x, y + down); }
+        else if (isEmpty(x - 1, y + down)) { swap(x, y, x - 1, y + down); }
+        else if (isEmpty(x + 1, y + down)) { swap(x, y, x + 1, y + down); }
+        else {
+          const pdir = Math.random() < 0.5 ? -1 : 1;
+          if (isEmpty(x + pdir, y)) { swap(x, y, x + pdir, y); }
+          else if (isEmpty(x - pdir, y)) { swap(x, y, x - pdir, y); }
+        }
+        // Spread through adjacent water — convert water to paint (colour spreads!)
+        if (Math.random() < 0.04) {
+          for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+            if (get(x+dx2, y+dy2) === 2) { // water
+              set(x+dx2, y+dy2, 33); // convert water to paint
+              break;
+            }
+          }
+        }
+      }
+      break;
+
+    case 'fairy':
+      // Fairy Dust: floats upward with gentle drift, sparkles, leaves glitter trail
+      {
+        const fdir = Math.random() < 0.5 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+        if (Math.random() < 0.7) {
+          // Float upward with drift
+          if (isEmpty(x + fdir, y - down)) { swap(x, y, x + fdir, y - down); }
+          else if (isEmpty(x, y - down)) { swap(x, y, x, y - down); }
+          else if (isEmpty(x - 1, y - down)) { swap(x, y, x - 1, y - down); }
+          else if (isEmpty(x + 1, y - down)) { swap(x, y, x + 1, y - down); }
+          else if (isEmpty(x - 1, y)) { swap(x, y, x - 1, y); }
+          else if (isEmpty(x + 1, y)) { swap(x, y, x + 1, y); }
+        }
+        // Leave glitter trail below (small chance)
+        if (Math.random() < 0.03 && isEmpty(x, y + down)) {
+          set(x, y + down, 20); // spawn glitter
+        }
+        // Touch water → rainbow bubbles
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          if (get(x+dx2, y+dy2) === 2 && Math.random() < 0.05) {
+            set(x+dx2, y+dy2, 18); // water → rainbow
+          }
+        }
+      }
+      break;
+
+    case 'moss':
+      // Moss: grows on adjacent stone/wood/glass surfaces, spreads slowly
+      {
+        if (Math.random() < 0.02) {
+          // Try to spread to an adjacent cell that touches stone/wood/glass
+          const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,1],[1,-1],[-1,-1]];
+          const dir = dirs[Math.floor(Math.random() * dirs.length)];
+          const nx = x + dir[0], ny = y + dir[1];
+          if (isEmpty(nx, ny)) {
+            // Only grow if the target cell is adjacent to stone, wood, or glass
+            let touchesSurface = false;
+            for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+              const sid = get(nx + dx2, ny + dy2);
+              if (sid === 3 || sid === 7 || sid === 14) { touchesSurface = true; break; }
+            }
+            // Also grow next to other moss
+            if (!touchesSurface) {
+              for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+                if (get(nx + dx2, ny + dy2) === 35) { touchesSurface = true; break; }
+              }
+            }
+            if (touchesSurface) set(nx, ny, 35);
+          }
+        }
+        // Fire kills moss
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          if (get(x + dx2, y + dy2) === 4) { set(x, y, EMPTY); break; }
+        }
+        // Water makes moss grow faster (handled by spread chance above)
+      }
+      break;
+
+    case 'soap':
+      // Soap: static solid. When water touches it, spawns bubbles. Acid dissolves it.
+      {
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          const nid = get(x + dx2, y + dy2);
+          // Water contact → bubbles!
+          if (nid === 2 && Math.random() < 0.08) {
+            set(x + dx2, y + dy2, 21, 200); // water becomes bubble
+          }
+          // Rainbow water also makes bubbles
+          if (nid === 18 && Math.random() < 0.12) {
+            set(x + dx2, y + dy2, 21, 200);
+          }
+          // Oil + soap → water (soap cleans oil!)
+          if (nid === 8 && Math.random() < 0.04) {
+            set(x + dx2, y + dy2, 2);
+          }
+          // Acid dissolves soap
+          if (nid === 9 && Math.random() < 0.1) {
+            set(x, y, EMPTY);
+            break;
+          }
+        }
+        // Lava melts soap
+        for (const [dx2, dy2] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+          if (get(x + dx2, y + dy2) === 10) { set(x, y, 11, 120); break; } // becomes steam
+        }
+      }
+      break;
+
+    // stone, wood, glass: static, do nothing
+  }
+}
+
+function simulate() {
+  if (paused) return;
+  moved.fill(0);
+  frame++;
+
+  // Alternate scan direction to prevent bias
+  const leftToRight = frame % 2 === 0;
+  const startY = gravDir > 0 ? ROWS - 1 : 0;
+  const endY = gravDir > 0 ? -1 : ROWS;
+  const stepY = gravDir > 0 ? -1 : 1;
+
+  for (let y = startY; y !== endY; y += stepY) {
+    if (leftToRight) {
+      for (let x = 0; x < COLS; x++) updateParticle(x, y);
+    } else {
+      for (let x = COLS - 1; x >= 0; x--) updateParticle(x, y);
+    }
+  }
+}
+
+// === Rendering ===
+function render() {
+  const data = imgData.data;
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const i = idx(x, y);
+      const id = grid[i];
+      const pi = (y * COLS + x) * 4;
+      if (id === EMPTY) {
+        data[pi] = 0; data[pi+1] = 0; data[pi+2] = 0; data[pi+3] = 255;
+      } else {
+        const el = BY_ID[id];
+        if (el) {
+          let [r, g, b] = el.color;
+          // Color variation
+          const v = ((x * 7 + y * 13 + id * 37) & 0x1f) - 16;
+          r = Math.max(0, Math.min(255, r + v));
+          g = Math.max(0, Math.min(255, g + v));
+          b = Math.max(0, Math.min(255, b + v));
+          // Fire flicker
+          if (id === 4) {
+            const flicker = Math.random() * 80;
+            r = Math.min(255, r + flicker);
+            g = Math.min(255, 40 + flicker * 0.6);
+            b = 0;
+          }
+          // Lava glow
+          if (id === 10) {
+            const glow = Math.random() * 50;
+            r = Math.min(255, r + glow);
+            g = Math.min(255, g + glow * 0.3);
+          }
+          // Slime glow
+          if (id === 15) {
+            const pulse = Math.sin(frame * 0.08 + x * 0.3 + y * 0.2) * 20;
+            g = Math.min(255, g + pulse);
+          }
+          // Snow sparkle
+          if (id === 17) {
+            const sparkle = ((x * 13 + y * 7 + frame * 3) & 0xf) < 2 ? 15 : 0;
+            r = Math.min(255, r + sparkle);
+            g = Math.min(255, g + sparkle);
+            b = Math.min(255, b + sparkle);
+          }
+          // Rainbow colour cycling
+          if (id === 18) {
+            const hueShift = (x * 0.15 + y * 0.1 + frame * 0.06) % 1;
+            const h = hueShift * 360;
+            const s = 0.8, l = 0.55;
+            // HSL to RGB approximation
+            const c = (1 - Math.abs(2 * l - 1)) * s;
+            const X = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = l - c / 2;
+            let r1, g1, b1;
+            if (h < 60) { r1=c; g1=X; b1=0; }
+            else if (h < 120) { r1=X; g1=c; b1=0; }
+            else if (h < 180) { r1=0; g1=c; b1=X; }
+            else if (h < 240) { r1=0; g1=X; b1=c; }
+            else if (h < 300) { r1=X; g1=0; b1=c; }
+            else { r1=c; g1=0; b1=X; }
+            r = Math.floor((r1 + m) * 255);
+            g = Math.floor((g1 + m) * 255);
+            b = Math.floor((b1 + m) * 255);
+          }
+          // Firework gold shimmer
+          if (id === 19) {
+            const shimmer = Math.sin(frame * 0.1 + x + y) * 30;
+            r = Math.min(255, r + shimmer);
+            g = Math.min(255, g + shimmer * 0.5);
+          }
+          // Glass shimmer
+          if (id === 14) {
+            const shimmer = Math.sin(x * 0.5 + y * 0.3) * 15;
+            r = Math.min(255, r + shimmer);
+            g = Math.min(255, g + shimmer);
+            b = Math.min(255, b + shimmer);
+          }
+          // Glitter sparkle — rapid colour cycling
+          if (id === 20) {
+            const hue = ((x * 17 + y * 31 + frame * 5) % 360);
+            const bright = ((x * 7 + y * 11 + frame * 3) & 0xf) < 3 ? 80 : 0;
+            const c2 = 0.7 * (1 - Math.abs(2 * 0.65 - 1));
+            const X2 = c2 * (1 - Math.abs((hue / 60) % 2 - 1));
+            const m2 = 0.65 - c2 / 2;
+            let gr, gg, gb;
+            if (hue < 60) { gr=c2; gg=X2; gb=0; }
+            else if (hue < 120) { gr=X2; gg=c2; gb=0; }
+            else if (hue < 180) { gr=0; gg=c2; gb=X2; }
+            else if (hue < 240) { gr=0; gg=X2; gb=c2; }
+            else if (hue < 300) { gr=X2; gg=0; gb=c2; }
+            else { gr=c2; gg=0; gb=X2; }
+            r = Math.min(255, Math.floor((gr + m2) * 255) + bright);
+            g = Math.min(255, Math.floor((gg + m2) * 255) + bright);
+            b = Math.min(255, Math.floor((gb + m2) * 255) + bright);
+          }
+          // Bubble transparency effect
+          if (id === 21) {
+            const shimmer = Math.sin(frame * 0.15 + x * 0.8 + y * 0.6) * 40;
+            const fade = life[i] / 200;
+            r = Math.min(255, Math.floor((r + shimmer) * fade));
+            g = Math.min(255, Math.floor((g + shimmer * 0.5) * fade));
+            b = Math.min(255, Math.floor((b + shimmer * 0.3) * fade));
+          }
+          // Magnet pulse
+          if (id === 22) {
+            const pulse = Math.sin(frame * 0.05) * 20;
+            r = Math.min(255, r + Math.abs(pulse));
+          }
+          // Lightning flash — bright white-yellow electric glow
+          if (id === 23) {
+            const flash = Math.random() * 80;
+            r = Math.min(255, 200 + flash);
+            g = Math.min(255, 200 + flash);
+            b = Math.min(255, 100 + flash * 0.5);
+          }
+          // Honey — warm amber glow, slow viscous shimmer
+          if (id === 24) {
+            const shimmer = Math.sin(frame * 0.03 + x * 0.2 + y * 0.15) * 15;
+            r = Math.min(255, r + shimmer);
+            g = Math.min(255, g + shimmer * 0.6);
+          }
+          // Vine — green with slight variation, darker when no water nearby
+          if (id === 25) {
+            const growth = Math.sin(frame * 0.02 + x * 0.4 + y * 0.3) * 12;
+            g = Math.min(255, g + growth);
+          }
+          // Wax — warm translucent glow, subtle shimmer
+          if (id === 26) {
+            const shimmer = Math.sin(frame * 0.04 + x * 0.3 + y * 0.2) * 10;
+            r = Math.min(255, r + shimmer);
+            g = Math.min(255, g + shimmer * 0.8);
+            b = Math.min(255, b + shimmer * 0.4);
+          }
+          // Confetti — each particle is a different bright colour
+          if (id === 27) {
+            const hue = ((x * 37 + y * 53) % 360);
+            const c2 = 0.85 * (1 - Math.abs(2 * 0.6 - 1));
+            const X2 = c2 * (1 - Math.abs((hue / 60) % 2 - 1));
+            const m2 = 0.6 - c2 / 2;
+            let cr, cg, cb;
+            if (hue < 60) { cr=c2; cg=X2; cb=0; }
+            else if (hue < 120) { cr=X2; cg=c2; cb=0; }
+            else if (hue < 180) { cr=0; cg=c2; cb=X2; }
+            else if (hue < 240) { cr=0; cg=X2; cb=c2; }
+            else if (hue < 300) { cr=X2; cg=0; cb=c2; }
+            else { cr=c2; cg=0; cb=X2; }
+            r = Math.min(255, Math.floor((cr + m2) * 255));
+            g = Math.min(255, Math.floor((cg + m2) * 255));
+            b = Math.min(255, Math.floor((cb + m2) * 255));
+            // Sparkle
+            if (((x * 11 + y * 7 + frame * 2) & 0xf) < 2) { r = Math.min(255, r + 60); g = Math.min(255, g + 60); b = Math.min(255, b + 60); }
+          }
+          // Crystal — icy blue with faceted shimmer
+          if (id === 28) {
+            const facet = Math.abs(Math.sin(x * 1.2 + y * 0.8)) * 30;
+            const pulse = Math.sin(frame * 0.03 + x * 0.1) * 10;
+            r = Math.min(255, r + facet * 0.3 + pulse);
+            g = Math.min(255, g + facet * 0.5 + pulse);
+            b = Math.min(255, b + facet + pulse);
+          }
+          // TNT — pulsing red glow
+          if (id === 29) {
+            const pulse = Math.sin(frame * 0.1 + x * 0.5 + y * 0.3) * 20;
+            r = Math.min(255, r + pulse + 20);
+            g = Math.max(0, g + pulse * 0.3);
+          }
+          // Seed — darkens as it grows (life increases)
+          if (id === 30) {
+            const growth = life[i] / 80;
+            g = Math.min(255, g + growth * 60);
+            r = Math.max(0, r - growth * 20);
+          }
+          // Portal — swirling purple energy
+          if (id === 31) {
+            const swirl = Math.sin(frame * 0.15 + x * 0.3 + y * 0.5) * 40;
+            const pulse = Math.sin(frame * 0.08) * 20;
+            r = Math.min(255, Math.max(0, r + swirl + pulse));
+            g = Math.min(255, Math.max(0, g + swirl * 0.3));
+            b = Math.min(255, Math.max(0, b + Math.abs(swirl) + pulse));
+          }
+          // Cloud — fluffy white/grey with slow shimmer
+          if (id === 32) {
+            const shimmer = Math.sin(frame * 0.02 + x * 0.15 + y * 0.2) * 15;
+            const fade = Math.min(1, life[i] / 200);
+            r = Math.min(255, Math.floor((220 + shimmer) * fade));
+            g = Math.min(255, Math.floor((220 + shimmer * 0.8) * fade));
+            b = Math.min(255, Math.floor((235 + shimmer * 0.5) * fade));
+          }
+          // Paint — vibrant red that subtly shimmers
+          if (id === 33) {
+            const shimmer = Math.sin(frame * 0.06 + x * 0.4 + y * 0.3) * 15;
+            r = Math.min(255, 220 + shimmer);
+            g = Math.max(0, 40 + shimmer * 0.3);
+            b = Math.max(0, 60 + shimmer * 0.2);
+          }
+          // Fairy Dust — shimmering hue cycle through pink/purple/cyan
+          if (id === 34) {
+            const hue = (frame * 0.04 + x * 0.2 + y * 0.15) % 1;
+            const sparkle = Math.sin(frame * 0.3 + x * 2.1 + y * 1.7) > 0.7 ? 80 : 0;
+            const fade = Math.min(1, life[i] / 100);
+            r = Math.min(255, Math.floor((180 + Math.sin(hue * 6.28) * 75 + sparkle) * fade));
+            g = Math.min(255, Math.floor((120 + Math.sin(hue * 6.28 + 2.09) * 60 + sparkle) * fade));
+            b = Math.min(255, Math.floor((220 + Math.sin(hue * 6.28 + 4.19) * 35 + sparkle) * fade));
+          }
+          // Moss — organic green variation, subtle life pulse
+          if (id === 35) {
+            const organic = Math.sin(x * 0.7 + y * 0.5) * 20 + Math.sin(x * 1.3 + y * 0.9) * 10;
+            r = Math.max(0, Math.min(255, 30 + organic * 0.3));
+            g = Math.max(0, Math.min(255, 90 + organic));
+            b = Math.max(0, Math.min(255, 25 + organic * 0.2));
+          }
+          // Soap — clean white with iridescent shimmer
+          if (id === 36) {
+            const shimmer = Math.sin(frame * 0.04 + x * 0.5 + y * 0.4) * 12;
+            const iridescence = Math.sin(x * 0.8 + y * 0.6) * 8;
+            r = Math.min(255, 235 + shimmer);
+            g = Math.min(255, 235 + shimmer + iridescence);
+            b = Math.min(255, 248 + shimmer - iridescence);
+          }
+          // Smoke/steam fade
+          if (id === 5 || id === 11) {
+            const fade = life[i] / (id === 5 ? 80 : 120);
+            r = Math.floor(r * fade);
+            g = Math.floor(g * fade);
+            b = Math.floor(b * fade);
+          }
+          data[pi] = r; data[pi+1] = g; data[pi+2] = b; data[pi+3] = 255;
+        }
+      }
+    }
+  }
+  tempCtx.putImageData(imgData, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tempCanvas, 0, 0, COLS, ROWS, 0, 0, canvas.width, canvas.height);
+}
+
+// === Input ===
+function paint(cx, cy) {
+  const el = ELEMENTS[selectedElement];
+  if (!el) return;
+  const r = brushSize;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx*dx + dy*dy > r*r) continue;
+      const px = cx + dx, py = cy + dy;
+      if (!inBounds(px, py)) continue;
+      if (el.id === -1) {
+        set(px, py, EMPTY);
+      } else if (isEmpty(px, py) || (Math.random() < 0.3 && el.type === 'liquid')) {
+        if (isEmpty(px, py)) {
+          let l = el.life ? (el.life * 0.7 + Math.random() * el.life * 0.3) : 0;
+          if (el.id === 27) l = 210 + Math.floor(Math.random() * 20); // confetti pop
+          set(px, py, el.id, l);
+        }
+      }
+    }
+  }
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  mouseDown = true;
+  const rect = canvas.getBoundingClientRect();
+  mouseX = Math.floor((e.clientX - rect.left) / PIXEL);
+  mouseY = Math.floor((e.clientY - rect.top) / PIXEL);
+  paint(mouseX, mouseY);
+});
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = Math.floor((e.clientX - rect.left) / PIXEL);
+  mouseY = Math.floor((e.clientY - rect.top) / PIXEL);
+  if (mouseDown) paint(mouseX, mouseY);
+});
+canvas.addEventListener('mouseup', () => mouseDown = false);
+canvas.addEventListener('mouseleave', () => mouseDown = false);
+
+// Touch support
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  mouseDown = true;
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches[0];
+  mouseX = Math.floor((t.clientX - rect.left) / PIXEL);
+  mouseY = Math.floor((t.clientY - rect.top) / PIXEL);
+  paint(mouseX, mouseY);
+}, { passive: false });
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const t = e.touches[0];
+  mouseX = Math.floor((t.clientX - rect.left) / PIXEL);
+  mouseY = Math.floor((t.clientY - rect.top) / PIXEL);
+  if (mouseDown) paint(mouseX, mouseY);
+}, { passive: false });
+canvas.addEventListener('touchend', () => mouseDown = false);
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  const keys = Object.keys(ELEMENTS);
+  const num = parseInt(e.key);
+  if (num >= 1 && num <= keys.length) {
+    selectedElement = keys[num - 1];
+    updateToolbar();
+  }
+  if (e.key === 'c') clearGrid();
+  if (e.key === 'p' || e.key === ' ') { e.preventDefault(); togglePause(); }
+});
+
+document.getElementById('brushSize').addEventListener('input', (e) => {
+  brushSize = parseInt(e.target.value);
+  document.getElementById('brushDisplay').textContent = brushSize;
+});
+
+// === UI ===
+function buildToolbar() {
+  const tb = document.getElementById('toolbar');
+  Object.entries(ELEMENTS).forEach(([key, el], i) => {
+    const btn = document.createElement('button');
+    btn.className = 'element-btn' + (key === selectedElement ? ' active' : '');
+    btn.style.setProperty('--el-color', `rgb(${el.color.join(',')})`);
+    btn.dataset.key = key;
+    btn.innerHTML = `<span class="swatch" style="background:rgb(${el.color.join(',')})"></span>${el.name}`;
+    if (i < 12) btn.innerHTML += `<span style="color:#555;font-size:0.75em">${i+1}</span>`;
+    btn.onclick = () => { selectedElement = key; updateToolbar(); };
+    tb.appendChild(btn);
+  });
+}
+
+function updateToolbar() {
+  document.querySelectorAll('.element-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.key === selectedElement);
+  });
+}
+
+function clearGrid() {
+  grid.fill(EMPTY);
+  life.fill(0);
+  particleCount = 0;
+}
+
+function togglePause() { paused = !paused; }
+
+function toggleGravity() {
+  gravDir *= -1;
+  document.getElementById('gravBtn').textContent = `Gravity: ${gravDir > 0 ? 'Down' : 'Up'}`;
+}
+
+// === Main loop ===
+function gameLoop() {
+  simulate();
+  render();
+  document.getElementById('stats').textContent =
+    `${particleCount.toLocaleString()} particles | ${COLS}x${ROWS} | ${paused ? 'PAUSED' : 'running'}`;
+  if (!document.hidden) requestAnimationFrame(gameLoop);
+}
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden) requestAnimationFrame(gameLoop); });
+
+buildToolbar();
+gameLoop();
+</script>
+</body>
+</html>

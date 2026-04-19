@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Automata</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; color: #c8ccd0; font-family: 'Courier New', monospace; overflow: hidden; }
+
+.container { display: flex; height: 100vh; }
+.sidebar {
+    width: 280px; min-width: 280px; background: #12121a;
+    border-right: 1px solid #2a2a3a; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+}
+.canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+canvas { background: #0a0a0f; cursor: crosshair; }
+
+h1 { font-size: 18px; color: #7fdbca; letter-spacing: 2px; text-transform: uppercase; }
+h2 { font-size: 12px; color: #c792ea; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+
+.controls { display: flex; flex-direction: column; gap: 6px; }
+.btn {
+    background: #1a1a2e; border: 1px solid #2a2a4a; color: #c8ccd0;
+    padding: 8px 12px; cursor: pointer; font-family: inherit; font-size: 12px;
+    transition: all 0.2s; text-align: left;
+}
+.btn:hover { background: #2a2a4e; border-color: #7fdbca; }
+.btn.active { background: #2a2a4e; border-color: #7fdbca; color: #7fdbca; }
+.btn-row { display: flex; gap: 4px; }
+.btn-row .btn { flex: 1; text-align: center; }
+
+.rule-grid {
+    display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px;
+}
+.rule-cell {
+    aspect-ratio: 1; background: #1a1a2e; border: 1px solid #2a2a4a;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 8px; color: #666;
+}
+.rule-cell.on { background: #7fdbca; border-color: #7fdbca; color: #0a0a0f; }
+
+select, input[type="range"] {
+    background: #1a1a2e; border: 1px solid #2a2a4a; color: #c8ccd0;
+    padding: 6px; font-family: inherit; font-size: 12px; width: 100%;
+}
+input[type="range"] { padding: 0; }
+
+.stats { font-size: 11px; color: #666; line-height: 1.6; }
+.stats span { color: #7fdbca; }
+
+.brush-info { font-size: 10px; color: #888; line-height: 1.5; }
+
+.preset-list { display: flex; flex-direction: column; gap: 3px; }
+.preset-list .btn { padding: 5px 8px; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="sidebar">
+    <h1>Automata</h1>
+    <a href="/emergence.html" style="display:block;background:#1a2a1e;border:1px solid #2a4a3a;color:#a0d0b0;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:8px;font-family:inherit;letter-spacing:1px">&#10022; Emergence &mdash; All Seven Models</a>
+    <a href="/lenia.html" style="display:block;background:#1a1a2e;border:1px solid #2a2a4a;color:#c792ea;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:4px;font-family:inherit;letter-spacing:1px">&#10024; Try Lenia &mdash; Continuous Life (GPU)</a>
+    <a href="/fluid.html" style="display:block;background:#1a1a2e;border:1px solid #2a2a4a;color:#7fdbca;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:4px;font-family:inherit;letter-spacing:1px">&#127754; Fluid Dynamics &mdash; Navier-Stokes (GPU)</a>
+    <a href="/reaction.html" style="display:block;background:#1a1a2e;border:1px solid #2a2a4a;color:#ff7eb6;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:4px;font-family:inherit;letter-spacing:1px">&#9883; Reaction-Diffusion &mdash; Gray-Scott (GPU)</a>
+    <a href="/particles.html" style="display:block;background:#1a1a2e;border:1px solid #2a2a4a;color:#f0c674;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:4px;font-family:inherit;letter-spacing:1px">&#9679; Particle Life &mdash; Emergent Behaviour</a>
+    <a href="/boids.html" style="display:block;background:#1a1a2e;border:1px solid #2a2a4a;color:#82aaff;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:4px;font-family:inherit;letter-spacing:1px">&#9656; Boids &mdash; Flocking Simulation</a>
+    <a href="/wfc.html" style="display:block;background:#1a1a2e;border:1px solid #2a2a4a;color:#e0a060;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:4px;font-family:inherit;letter-spacing:1px">&#9638; Wave Function Collapse &mdash; Constraint Maps</a>
+    <a href="/evolution.html" style="display:block;background:#1a1a2e;border:1px solid #2a2a4a;color:#a0e060;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:4px;font-family:inherit;letter-spacing:1px">&#129516; Evolution &mdash; Natural Selection</a>
+    <a href="/lsystem.html" style="display:block;background:#1a1a2e;border:1px solid #2a2a4a;color:#90c080;padding:8px 12px;text-decoration:none;font-size:12px;margin-bottom:4px;font-family:inherit;letter-spacing:1px">&#127793; L-Systems &mdash; Fractal Plants</a>
+
+    <div>
+        <h2>Rule Set</h2>
+        <select id="ruleSelect">
+            <option value="life">Conway's Game of Life</option>
+            <option value="highlife">HighLife (B36/S23)</option>
+            <option value="daynight">Day & Night (B3678/S34678)</option>
+            <option value="seeds">Seeds (B2/S)</option>
+            <option value="brian">Brian's Brain</option>
+            <option value="wireworld">Wireworld</option>
+            <option value="langton">Langton's Ant</option>
+            <option value="custom">Custom (B/S)</option>
+        </select>
+    </div>
+
+    <div id="customRules" style="display:none">
+        <h2>Birth (B)</h2>
+        <div class="rule-grid" id="birthRules"></div>
+        <h2 style="margin-top:6px">Survival (S)</h2>
+        <div class="rule-grid" id="survivalRules"></div>
+    </div>
+
+    <div>
+        <h2>Presets</h2>
+        <div class="preset-list" id="presets"></div>
+    </div>
+
+    <div>
+        <h2>Controls</h2>
+        <div class="btn-row">
+            <button class="btn" id="playBtn" onclick="togglePlay()">▶ Play</button>
+            <button class="btn" onclick="step()">⏭ Step</button>
+        </div>
+        <div class="btn-row">
+            <button class="btn" onclick="clearGrid()">Clear</button>
+            <button class="btn" onclick="randomize()">Random</button>
+        </div>
+    </div>
+
+    <div>
+        <h2>Speed</h2>
+        <input type="range" id="speed" min="1" max="60" value="15">
+    </div>
+
+    <div>
+        <h2>Grid Size</h2>
+        <select id="gridSize" onchange="resizeGrid()">
+            <option value="100">100×100</option>
+            <option value="150" selected>150×150</option>
+            <option value="200">200×200</option>
+            <option value="300">300×300</option>
+        </select>
+    </div>
+
+    <div>
+        <h2>Brush</h2>
+        <div class="btn-row">
+            <button class="btn active" id="brushDot" onclick="setBrush('dot')">Dot</button>
+            <button class="btn" id="brushGlider" onclick="setBrush('glider')">Glider</button>
+            <button class="btn" id="brushLwss" onclick="setBrush('lwss')">LWSS</button>
+        </div>
+        <div class="btn-row">
+            <button class="btn" id="brushPulsar" onclick="setBrush('pulsar')">Pulsar</button>
+            <button class="btn" id="brushGun" onclick="setBrush('gun')">Gun</button>
+        </div>
+        <div class="brush-info" id="brushInfo">Click to draw, right-click to erase</div>
+    </div>
+
+    <div>
+        <h2>Colours</h2>
+        <select id="colourScheme" onchange="updateColours()">
+            <option value="cyan">Cyan</option>
+            <option value="green">Matrix Green</option>
+            <option value="fire">Fire</option>
+            <option value="purple">Purple Haze</option>
+            <option value="age">Age (heat map)</option>
+        </select>
+    </div>
+
+    <div class="stats" id="stats">
+        Generation: <span>0</span><br>
+        Population: <span>0</span><br>
+        FPS: <span>0</span>
+    </div>
+
+    <div>
+        <h2>Population</h2>
+        <canvas id="popGraph" width="248" height="80" style="width:100%;background:#0a0a0f;border:1px solid #2a2a3a;border-radius:4px;"></canvas>
+    </div>
+</div>
+<div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+</div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let COLS = 150, ROWS = 150;
+let cellSize;
+let grid, nextGrid, age;
+let playing = false;
+let generation = 0;
+let population = 0;
+let animFrame;
+let lastTime = 0;
+let fps = 0;
+let frameCount = 0;
+let fpsTime = 0;
+let popHistory = [];
+
+// Rule type
+let ruleType = 'life';
+let birthRules = new Set([3]);
+let survivalRules = new Set([2, 3]);
+
+// Brush
+let brushType = 'dot';
+let drawing = false;
+let erasing = false;
+
+// Langton's ant
+let ant = { x: 75, y: 75, dir: 0 }; // 0=up,1=right,2=down,3=left
+
+// Brian's Brain: 0=off, 1=on, 2=dying
+// Wireworld: 0=empty, 1=wire, 2=head, 3=tail
+
+// Colour schemes
+const colours = {
+    cyan: { alive: '#7fdbca', dying: '#2a5a50', bg: '#0a0a0f' },
+    green: { alive: '#00ff41', dying: '#004010', bg: '#0a0a0f' },
+    fire: { alive: '#ff6b35', dying: '#4a1a00', bg: '#0a0a0f' },
+    purple: { alive: '#c792ea', dying: '#3a1a5a', bg: '#0a0a0f' },
+    age: { alive: null, dying: '#1a1a2e', bg: '#0a0a0f' } // special
+};
+let colourScheme = 'cyan';
+
+// Patterns
+const patterns = {
+    glider: [[0,1,0],[0,0,1],[1,1,1]],
+    lwss: [[0,1,0,0,1],[1,0,0,0,0],[1,0,0,0,1],[1,1,1,1,0]],
+    pulsar: (function() {
+        const p = Array.from({length:15}, () => Array(15).fill(0));
+        const coords = [
+            [2,4],[2,5],[2,6],[2,10],[2,11],[2,12],
+            [4,2],[5,2],[6,2],[4,7],[5,7],[6,7],
+            [4,9],[5,9],[6,9],[4,14],[5,14],[6,14],
+            [7,4],[7,5],[7,6],[7,10],[7,11],[7,12],
+            [9,4],[9,5],[9,6],[9,10],[9,11],[9,12],
+            [10,2],[11,2],[12,2],[10,7],[11,7],[12,7],
+            [10,9],[11,9],[12,9],[10,14],[11,14],[12,14],
+            [14,4],[14,5],[14,6],[14,10],[14,11],[14,12]
+        ];
+        coords.forEach(([r,c]) => { if(r<15&&c<15) p[r][c]=1; });
+        return p;
+    })(),
+    gliderGun: (function(){
+        const g = Array.from({length:11}, () => Array(38).fill(0));
+        [[0,24],[1,22],[1,24],[2,12],[2,13],[2,20],[2,21],[2,34],[2,35],
+         [3,11],[3,15],[3,20],[3,21],[3,34],[3,35],[4,0],[4,1],[4,10],
+         [4,16],[4,20],[4,21],[5,0],[5,1],[5,10],[5,14],[5,16],[5,17],
+         [5,22],[5,24],[6,10],[6,16],[6,24],[7,11],[7,15],[8,12],[8,13]
+        ].forEach(([r,c]) => { if(r<11&&c<38) g[r][c]=1; });
+        return g;
+    })(),
+    rpentomino: [[0,1,1],[1,1,0],[0,1,0]],
+    acorn: [[0,1,0,0,0,0,0],[0,0,0,1,0,0,0],[1,1,0,0,1,1,1]],
+    diehard: [[0,0,0,0,0,0,1,0],[1,1,0,0,0,0,0,0],[0,1,0,0,0,1,1,1]],
+    pentadecathlon: (function() {
+        const p = Array.from({length: 3}, () => Array(10).fill(0));
+        [0,1,2,3,4,5,6,7,8,9].forEach(c => p[1][c] = 1);
+        p[0][2] = 1; p[2][2] = 1; p[0][7] = 1; p[2][7] = 1;
+        p[1][2] = 0; p[1][7] = 0;
+        return p;
+    })(),
+    beacon: [[1,1,0,0],[1,0,0,0],[0,0,0,1],[0,0,1,1]],
+    toad: [[0,1,1,1],[1,1,1,0]],
+    block: [[1,1],[1,1]],
+    beehive: [[0,1,1,0],[1,0,0,1],[0,1,1,0]],
+    infiniteGrowth: [[1,1,1,0,1],[1,0,0,0,0],[0,0,0,1,1],[0,1,1,0,1],[1,0,1,0,1]]
+};
+
+// Presets UI
+const presetDefs = [
+    { name: 'Glider Gun', pattern: 'gliderGun', rule: 'life' },
+    { name: 'R-pentomino', pattern: 'rpentomino', rule: 'life' },
+    { name: 'Acorn', pattern: 'acorn', rule: 'life' },
+    { name: 'Diehard', pattern: 'diehard', rule: 'life' },
+    { name: 'Pentadecathlon', pattern: 'pentadecathlon', rule: 'life' },
+    { name: 'Infinite Growth', pattern: 'infiniteGrowth', rule: 'life' },
+    { name: 'Spaceship Fleet', pattern: 'fleet', rule: 'life' },
+    { name: 'Random Soup', pattern: 'random', rule: 'life' },
+    { name: 'HighLife Replicator', pattern: 'replicator', rule: 'highlife' },
+    { name: 'Brian\'s Brain Soup', pattern: 'random', rule: 'brian' },
+    { name: 'Seeds Explosion', pattern: 'rpentomino', rule: 'seeds' },
+];
+
+function initPresets() {
+    const el = document.getElementById('presets');
+    el.innerHTML = '';
+    presetDefs.forEach(p => {
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.textContent = p.name;
+        btn.onclick = () => loadPreset(p);
+        el.appendChild(btn);
+    });
+}
+
+function loadPreset(p) {
+    if (p.rule) {
+        document.getElementById('ruleSelect').value = p.rule;
+        setRule(p.rule);
+    }
+    clearGrid();
+    if (p.pattern === 'random') {
+        randomize();
+    } else if (p.pattern === 'fleet') {
+        // Multiple spaceships heading in different directions
+        const cx = Math.floor(COLS/2), cy = Math.floor(ROWS/2);
+        placePattern(patterns.glider, cx - 20, cy - 20);
+        placePattern(patterns.glider, cx - 15, cy - 15);
+        placePattern(patterns.glider, cx - 10, cy - 10);
+        placePattern(patterns.lwss, cx + 5, cy - 3);
+        placePattern(patterns.lwss, cx + 5, cy + 5);
+        placePattern(patterns.glider, cx - 25, cy);
+    } else if (p.pattern === 'replicator') {
+        const pat = [[1,1,1],[1,0,0],[1,0,0]];
+        placePattern(pat, Math.floor(COLS/2)-1, Math.floor(ROWS/2)-1);
+    } else {
+        const pat = patterns[p.pattern];
+        if (pat) placePattern(pat, Math.floor(COLS/2)-Math.floor(pat[0].length/2),
+                               Math.floor(ROWS/2)-Math.floor(pat.length/2));
+    }
+    render();
+}
+
+function placePattern(pat, ox, oy) {
+    for (let r = 0; r < pat.length; r++) {
+        for (let c = 0; c < pat[r].length; c++) {
+            const x = ox + c, y = oy + r;
+            if (x >= 0 && x < COLS && y >= 0 && y < ROWS) {
+                grid[y][x] = pat[r][c];
+                if (pat[r][c]) age[y][x] = 1;
+            }
+        }
+    }
+}
+
+function initGrid() {
+    grid = Array.from({length: ROWS}, () => new Uint8Array(COLS));
+    nextGrid = Array.from({length: ROWS}, () => new Uint8Array(COLS));
+    age = Array.from({length: ROWS}, () => new Uint16Array(COLS));
+    generation = 0;
+    ant = { x: Math.floor(COLS/2), y: Math.floor(ROWS/2), dir: 0 };
+}
+
+function resizeCanvas() {
+    const wrap = canvas.parentElement;
+    const maxW = wrap.clientWidth - 20;
+    const maxH = wrap.clientHeight - 20;
+    cellSize = Math.max(1, Math.min(Math.floor(maxW / COLS), Math.floor(maxH / ROWS)));
+    canvas.width = COLS * cellSize;
+    canvas.height = ROWS * cellSize;
+}
+
+function resizeGrid() {
+    const size = parseInt(document.getElementById('gridSize').value);
+    COLS = ROWS = size;
+    initGrid();
+    resizeCanvas();
+    render();
+}
+
+function clearGrid() {
+    initGrid();
+    popHistory = [];
+    render();
+}
+
+function randomize() {
+    const density = ruleType === 'brian' ? 0.15 : ruleType === 'wireworld' ? 0 : 0.25;
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            if (ruleType === 'brian') {
+                grid[y][x] = Math.random() < density ? 1 : 0;
+            } else {
+                grid[y][x] = Math.random() < density ? 1 : 0;
+            }
+            age[y][x] = grid[y][x] ? 1 : 0;
+        }
+    }
+    generation = 0;
+    render();
+}
+
+function setRule(type) {
+    ruleType = type;
+    document.getElementById('customRules').style.display = type === 'custom' ? 'block' : 'none';
+    switch(type) {
+        case 'life': birthRules = new Set([3]); survivalRules = new Set([2,3]); break;
+        case 'highlife': birthRules = new Set([3,6]); survivalRules = new Set([2,3]); break;
+        case 'daynight': birthRules = new Set([3,6,7,8]); survivalRules = new Set([3,4,6,7,8]); break;
+        case 'seeds': birthRules = new Set([2]); survivalRules = new Set(); break;
+        case 'custom': break;
+    }
+    updateCustomRuleUI();
+}
+
+function updateCustomRuleUI() {
+    ['birth', 'survival'].forEach(type => {
+        const el = document.getElementById(type + 'Rules');
+        el.innerHTML = '';
+        const set = type === 'birth' ? birthRules : survivalRules;
+        for (let i = 0; i <= 8; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'rule-cell' + (set.has(i) ? ' on' : '');
+            cell.textContent = i;
+            cell.onclick = () => {
+                if (set.has(i)) set.delete(i); else set.add(i);
+                cell.classList.toggle('on');
+                document.getElementById('ruleSelect').value = 'custom';
+                ruleType = 'custom';
+            };
+            el.appendChild(cell);
+        }
+    });
+}
+
+function countNeighbors(x, y) {
+    let count = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = (x + dx + COLS) % COLS;
+            const ny = (y + dy + ROWS) % ROWS;
+            if (grid[ny][nx] > 0) count++;
+        }
+    }
+    return count;
+}
+
+function countNeighborsLife(x, y) {
+    let count = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = (x + dx + COLS) % COLS;
+            const ny = (y + dy + ROWS) % ROWS;
+            if (grid[ny][nx] === 1) count++;
+        }
+    }
+    return count;
+}
+
+function step() {
+    if (ruleType === 'langton') {
+        stepLangton();
+    } else if (ruleType === 'brian') {
+        stepBrian();
+    } else if (ruleType === 'wireworld') {
+        stepWireworld();
+    } else {
+        stepLife();
+    }
+    generation++;
+    render();
+}
+
+function stepLife() {
+    population = 0;
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            const n = countNeighborsLife(x, y);
+            const alive = grid[y][x] === 1;
+            if (alive) {
+                nextGrid[y][x] = survivalRules.has(n) ? 1 : 0;
+            } else {
+                nextGrid[y][x] = birthRules.has(n) ? 1 : 0;
+            }
+            if (nextGrid[y][x]) {
+                population++;
+                age[y][x] = (age[y][x] || 0) + 1;
+            } else {
+                age[y][x] = 0;
+            }
+        }
+    }
+    [grid, nextGrid] = [nextGrid, grid];
+}
+
+function stepBrian() {
+    population = 0;
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            if (grid[y][x] === 0) {
+                // Dead: become alive if exactly 2 neighbors alive
+                const n = countNeighborsLife(x, y);
+                nextGrid[y][x] = n === 2 ? 1 : 0;
+            } else if (grid[y][x] === 1) {
+                // Alive: become dying
+                nextGrid[y][x] = 2;
+            } else {
+                // Dying: become dead
+                nextGrid[y][x] = 0;
+            }
+            if (nextGrid[y][x] === 1) population++;
+            age[y][x] = nextGrid[y][x] === 1 ? (age[y][x] || 0) + 1 : 0;
+        }
+    }
+    [grid, nextGrid] = [nextGrid, grid];
+}
+
+function stepWireworld() {
+    population = 0;
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            const state = grid[y][x];
+            if (state === 0) {
+                nextGrid[y][x] = 0; // empty stays empty
+            } else if (state === 2) {
+                nextGrid[y][x] = 3; // head → tail
+            } else if (state === 3) {
+                nextGrid[y][x] = 1; // tail → wire
+            } else if (state === 1) {
+                // Wire: count electron head neighbors
+                let heads = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = (x + dx + COLS) % COLS;
+                        const ny = (y + dy + ROWS) % ROWS;
+                        if (grid[ny][nx] === 2) heads++;
+                    }
+                }
+                nextGrid[y][x] = (heads === 1 || heads === 2) ? 2 : 1;
+            }
+            if (nextGrid[y][x] > 0) population++;
+        }
+    }
+    [grid, nextGrid] = [nextGrid, grid];
+}
+
+function stepLangton() {
+    population = 0;
+    // Move ant
+    const { x, y, dir } = ant;
+    if (grid[y][x] === 0) {
+        // White: turn right, colour black, move forward
+        grid[y][x] = 1;
+        ant.dir = (dir + 1) % 4;
+    } else {
+        // Black: turn left, colour white, move forward
+        grid[y][x] = 0;
+        ant.dir = (dir + 3) % 4;
+    }
+    // Move
+    const moves = [[0,-1],[1,0],[0,1],[-1,0]];
+    ant.x = (ant.x + moves[ant.dir][0] + COLS) % COLS;
+    ant.y = (ant.y + moves[ant.dir][1] + ROWS) % ROWS;
+    // Count
+    for (let y = 0; y < ROWS; y++)
+        for (let x = 0; x < COLS; x++)
+            if (grid[y][x]) population++;
+}
+
+function ageColor(a) {
+    if (a < 5) return '#3498db';
+    if (a < 15) return '#2ecc71';
+    if (a < 40) return '#f1c40f';
+    if (a < 100) return '#e67e22';
+    return '#e74c3c';
+}
+
+function render() {
+    const scheme = colours[colourScheme];
+    ctx.fillStyle = scheme.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (ruleType === 'wireworld') {
+        const stateColors = ['', '#f1c40f', '#3498db', '#e74c3c']; // empty, wire, head, tail
+        for (let y = 0; y < ROWS; y++) {
+            for (let x = 0; x < COLS; x++) {
+                if (grid[y][x] > 0) {
+                    ctx.fillStyle = stateColors[grid[y][x]];
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+        }
+    } else if (ruleType === 'brian') {
+        for (let y = 0; y < ROWS; y++) {
+            for (let x = 0; x < COLS; x++) {
+                if (grid[y][x] === 1) {
+                    ctx.fillStyle = colourScheme === 'age' ? ageColor(age[y][x]) : scheme.alive;
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                } else if (grid[y][x] === 2) {
+                    ctx.fillStyle = scheme.dying || '#333';
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+        }
+    } else {
+        population = 0;
+        for (let y = 0; y < ROWS; y++) {
+            for (let x = 0; x < COLS; x++) {
+                if (grid[y][x]) {
+                    population++;
+                    if (colourScheme === 'age') {
+                        ctx.fillStyle = ageColor(age[y][x]);
+                    } else {
+                        ctx.fillStyle = scheme.alive;
+                    }
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+        }
+    }
+
+    // Draw ant for Langton's
+    if (ruleType === 'langton') {
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(ant.x * cellSize, ant.y * cellSize, cellSize, cellSize);
+    }
+
+    // Grid lines if cells are large enough
+    if (cellSize >= 6) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 0.5;
+        for (let x = 0; x <= COLS; x++) {
+            ctx.beginPath();
+            ctx.moveTo(x * cellSize, 0);
+            ctx.lineTo(x * cellSize, ROWS * cellSize);
+            ctx.stroke();
+        }
+        for (let y = 0; y <= ROWS; y++) {
+            ctx.beginPath();
+            ctx.moveTo(0, y * cellSize);
+            ctx.lineTo(COLS * cellSize, y * cellSize);
+            ctx.stroke();
+        }
+    }
+
+    updateStats();
+}
+
+function updateStats() {
+    const el = document.getElementById('stats');
+    el.innerHTML = `Generation: <span>${generation}</span><br>Population: <span>${population}</span><br>FPS: <span>${fps}</span>`;
+
+    // Population graph
+    popHistory.push(population);
+    if (popHistory.length > 248) popHistory = popHistory.slice(-248);
+    const gc = document.getElementById('popGraph');
+    const gx = gc.getContext('2d');
+    const gw = gc.width, gh = gc.height;
+    gx.fillStyle = '#0a0a0f';
+    gx.fillRect(0, 0, gw, gh);
+    if (popHistory.length > 1) {
+        const maxPop = Math.max(...popHistory, 1);
+        gx.strokeStyle = '#7fdbca';
+        gx.lineWidth = 1;
+        gx.beginPath();
+        for (let i = 0; i < popHistory.length; i++) {
+            const px = (i / (popHistory.length - 1)) * gw;
+            const py = gh - (popHistory[i] / maxPop) * (gh - 4) - 2;
+            if (i === 0) gx.moveTo(px, py); else gx.lineTo(px, py);
+        }
+        gx.stroke();
+        // Fill under
+        gx.lineTo(gw, gh);
+        gx.lineTo(0, gh);
+        gx.closePath();
+        gx.fillStyle = 'rgba(127, 219, 202, 0.08)';
+        gx.fill();
+    }
+}
+
+function togglePlay() {
+    playing = !playing;
+    document.getElementById('playBtn').textContent = playing ? '⏸ Pause' : '▶ Play';
+    document.getElementById('playBtn').classList.toggle('active', playing);
+    if (playing) requestAnimationFrame(gameLoop);
+}
+
+function gameLoop(timestamp) {
+    if (!playing) return;
+    const targetFPS = parseInt(document.getElementById('speed').value);
+    const interval = 1000 / targetFPS;
+
+    // FPS calculation
+    frameCount++;
+    if (timestamp - fpsTime >= 1000) {
+        fps = frameCount;
+        frameCount = 0;
+        fpsTime = timestamp;
+    }
+
+    if (timestamp - lastTime >= interval) {
+        // Langton's ant can do multiple steps per frame for speed
+        if (ruleType === 'langton') {
+            const stepsPerFrame = Math.max(1, Math.floor(targetFPS / 2));
+            for (let i = 0; i < stepsPerFrame; i++) step();
+        } else {
+            step();
+        }
+        lastTime = timestamp;
+    }
+    if (!document.hidden) animFrame = requestAnimationFrame(gameLoop);
+}
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden && playing) requestAnimationFrame(gameLoop); });
+
+// Mouse drawing
+function getCellFromMouse(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / cellSize);
+    const y = Math.floor((e.clientY - rect.top) / cellSize);
+    return { x: Math.max(0, Math.min(x, COLS-1)), y: Math.max(0, Math.min(y, ROWS-1)) };
+}
+
+function placeBrush(cx, cy, value) {
+    if (brushType === 'dot') {
+        grid[cy][cx] = value;
+        age[cy][cx] = value ? 1 : 0;
+    } else if (brushType === 'glider' && value) {
+        placePattern(patterns.glider, cx - 1, cy - 1);
+    } else if (brushType === 'lwss' && value) {
+        placePattern(patterns.lwss, cx - 2, cy - 2);
+    } else if (brushType === 'pulsar' && value) {
+        placePattern(patterns.pulsar, cx - 7, cy - 7);
+    } else if (brushType === 'gun' && value) {
+        placePattern(patterns.gliderGun, cx - 19, cy - 5);
+    }
+}
+
+canvas.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const { x, y } = getCellFromMouse(e);
+    if (e.button === 2) {
+        erasing = true;
+        placeBrush(x, y, 0);
+    } else {
+        drawing = true;
+        const val = ruleType === 'wireworld' ? 1 : 1;
+        placeBrush(x, y, val);
+    }
+    render();
+});
+
+canvas.addEventListener('mousemove', e => {
+    if (!drawing && !erasing) return;
+    const { x, y } = getCellFromMouse(e);
+    if (drawing) placeBrush(x, y, 1);
+    if (erasing) placeBrush(x, y, 0);
+    render();
+});
+
+canvas.addEventListener('mouseup', () => { drawing = false; erasing = false; });
+canvas.addEventListener('mouseleave', () => { drawing = false; erasing = false; });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+function setBrush(type) {
+    brushType = type;
+    // Remove active from all brush buttons
+    ['Dot','Glider','Lwss','Pulsar','Gun'].forEach(n => {
+        const el = document.getElementById('brush' + n);
+        if (el) el.classList.remove('active');
+    });
+    const id = 'brush' + type.charAt(0).toUpperCase() + type.slice(1);
+    const el = document.getElementById(id);
+    if (el) el.classList.add('active');
+}
+
+function updateColours() {
+    colourScheme = document.getElementById('colourScheme').value;
+    render();
+}
+
+document.getElementById('ruleSelect').addEventListener('change', e => {
+    setRule(e.target.value);
+    clearGrid();
+});
+
+// Init
+window.addEventListener('resize', () => { resizeCanvas(); render(); });
+initGrid();
+resizeCanvas();
+updateCustomRuleUI();
+initPresets();
+render();
+</script>
+</body>
+</html>

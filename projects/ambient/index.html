@@ -1,0 +1,1417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Garden — Generative Ambient Music</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #060810;
+  color: #8090a8;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+}
+
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+}
+
+.ui {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 2rem;
+}
+
+.title {
+  font-size: 2.4rem;
+  font-weight: 200;
+  letter-spacing: 0.15em;
+  color: #c0d0e8;
+  margin-bottom: 0.3rem;
+  text-transform: lowercase;
+}
+
+.subtitle {
+  font-size: 0.8rem;
+  color: #4a5a70;
+  letter-spacing: 0.1em;
+  margin-bottom: 3rem;
+}
+
+#startBtn {
+  background: none;
+  border: 1px solid #1a2a40;
+  color: #6a8ab0;
+  padding: 14px 48px;
+  font-size: 1rem;
+  letter-spacing: 0.15em;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: all 0.6s ease;
+  font-family: inherit;
+}
+#startBtn:hover {
+  border-color: #3a5a80;
+  color: #a0c0e0;
+  box-shadow: 0 0 30px rgba(80, 140, 220, 0.1);
+}
+#startBtn.playing {
+  border-color: #2a3a50;
+  color: #4a6080;
+}
+
+.controls {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+.controls.visible { display: flex; }
+
+.voice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  max-width: 700px;
+  width: 100%;
+}
+
+.voice {
+  background: rgba(15, 20, 30, 0.7);
+  border: 1px solid #1a2235;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  transition: all 0.5s;
+  backdrop-filter: blur(10px);
+}
+.voice.active {
+  border-color: #2a4060;
+  box-shadow: 0 0 15px rgba(60, 120, 200, 0.05);
+}
+.voice-name {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #4a6080;
+  margin-bottom: 4px;
+}
+.voice-note {
+  font-family: 'Cascadia Code', monospace;
+  font-size: 1.1rem;
+  color: #6a90b8;
+  transition: color 0.3s;
+}
+.voice.active .voice-note { color: #90b8e0; }
+.voice-cycle {
+  font-size: 0.6rem;
+  color: #2a3a50;
+  margin-top: 2px;
+}
+
+.mood-controls {
+  display: flex;
+  gap: 8px;
+}
+.mood-btn {
+  background: none;
+  border: 1px solid #1a2235;
+  color: #4a5a70;
+  padding: 6px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  transition: all 0.3s;
+  font-family: inherit;
+}
+.mood-btn:hover { border-color: #2a4060; color: #7a9ab8; }
+.mood-btn.active { border-color: #3a5a80; color: #90b8e0; }
+
+.status {
+  font-size: 0.65rem;
+  color: #2a3a50;
+  letter-spacing: 0.05em;
+  margin-top: 1rem;
+}
+</style>
+</head>
+<body>
+<canvas id="viz"></canvas>
+
+<div class="ui">
+  <div class="title">garden</div>
+  <div class="subtitle">generative ambient music</div>
+  <div class="subtitle" id="weatherNote" style="margin-top:0.5rem;font-size:0.65rem;color:#2a3a50"></div>
+  <button id="startBtn" onclick="togglePlay()">listen</button>
+
+  <div class="controls" id="controls">
+    <div class="voice-grid" id="voiceGrid"></div>
+    <div class="mood-controls" id="moodControls"></div>
+    <div class="status" id="status"></div>
+  </div>
+</div>
+
+<script>
+// === Generative Ambient Music Engine ===
+// Inspired by Brian Eno's incommensurable loops technique.
+// Each voice plays a tone on its own cycle length. Because the cycle
+// lengths are coprime (or nearly so), the voices drift in and out of
+// alignment, creating music that never repeats.
+
+let audioCtx = null;
+let playing = false;
+let voices = [];
+let masterGain = null;
+let reverbNode = null;
+let analyser = null;
+let vizCanvas, vizCtx, vizAnimId;
+
+// Moods define the tonal palette and timing feel
+const MOODS = {
+  dusk: {
+    name: 'dusk',
+    // Notes as frequencies — a pentatonic-ish set in the key of D
+    // D3, F#3, A3, D4, E4, F#4, A4, B4, D5
+    freqs: [146.83, 185.00, 220.00, 293.66, 329.63, 369.99, 440.00, 493.88, 587.33],
+    cycleRange: [18, 45],  // seconds — long, slow
+    attackRange: [2, 5],
+    sustainRange: [4, 10],
+    releaseRange: [4, 10],
+    waveforms: ['sine', 'triangle'],
+    detuneRange: [-8, 8],
+    description: 'warm pentatonic, slow drift'
+  },
+  fog: {
+    name: 'fog',
+    // Lower, more sparse — C minor
+    // C2, Eb3, G3, Bb3, C4, Eb4, G4
+    freqs: [65.41, 155.56, 196.00, 233.08, 261.63, 311.13, 392.00],
+    cycleRange: [25, 60],
+    attackRange: [3, 8],
+    sustainRange: [6, 15],
+    releaseRange: [5, 12],
+    waveforms: ['sine'],
+    detuneRange: [-5, 5],
+    description: 'deep minor, glacial pace'
+  },
+  dawn: {
+    name: 'dawn',
+    // Bright major — G major pentatonic
+    // G3, A3, B3, D4, E4, G4, A4, B4, D5, G5
+    freqs: [196.00, 220.00, 246.94, 293.66, 329.63, 392.00, 440.00, 493.88, 587.33, 783.99],
+    cycleRange: [12, 30],
+    attackRange: [1.5, 4],
+    sustainRange: [3, 8],
+    releaseRange: [3, 7],
+    waveforms: ['sine', 'triangle'],
+    detuneRange: [-6, 6],
+    description: 'bright major, gentle motion'
+  },
+  stars: {
+    name: 'stars',
+    // Lydian mode — ethereal, spacious
+    // A2, C#3, E3, G#3, A3, C#4, E4, F#4, A4
+    freqs: [110.00, 138.59, 164.81, 207.65, 220.00, 277.18, 329.63, 369.99, 440.00],
+    cycleRange: [20, 50],
+    attackRange: [2, 6],
+    sustainRange: [5, 12],
+    releaseRange: [4, 10],
+    waveforms: ['sine', 'triangle'],
+    detuneRange: [-10, 10],
+    description: 'lydian mode, wide intervals'
+  },
+  rain: {
+    name: 'rain',
+    // Dorian mode — melancholic but not dark
+    // D3, E3, F3, A3, C4, D4, E4, F4, A4, C5
+    freqs: [146.83, 164.81, 174.61, 220.00, 261.63, 293.66, 329.63, 349.23, 440.00, 523.25],
+    cycleRange: [10, 28],
+    attackRange: [1, 3],
+    sustainRange: [2, 5],
+    releaseRange: [3, 8],
+    waveforms: ['sine', 'triangle'],
+    detuneRange: [-12, 12],
+    description: 'dorian mode, gentle droplets'
+  },
+  midnight: {
+    name: 'midnight',
+    // Very low, sparse — open fifths and octaves in Bb
+    // Bb1, F2, Bb2, F3, Db3, Bb3, F4
+    freqs: [58.27, 87.31, 116.54, 174.61, 138.59, 233.08, 349.23],
+    cycleRange: [35, 80],
+    attackRange: [4, 10],
+    sustainRange: [8, 20],
+    releaseRange: [6, 15],
+    waveforms: ['sine'],
+    detuneRange: [-4, 4],
+    description: 'deep open fifths, vast and still'
+  }
+};
+
+let currentMood = 'dusk';
+const NUM_VOICES = 8;
+
+// Generation strategies: 'cycles' (Eno-style), 'markov' (melodic chains), 'automata' (CA rhythm), 'spectral' (harmonic drift)
+const STRATEGIES = ['cycles', 'cycles', 'cycles', 'markov', 'markov', 'markov', 'automata', 'spectral'];
+
+function rand(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+function pickFrom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// Generate a cycle length that avoids simple ratios with existing cycles
+function generateCycleLength(mood, existingCycles) {
+  const [lo, hi] = mood.cycleRange;
+  let best = rand(lo, hi);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const candidate = lo + (Math.random() * (hi - lo));
+    let minRatio = Infinity;
+    for (const c of existingCycles) {
+      const ratio = candidate / c;
+      for (const simple of [1, 2, 3, 0.5, 1.5, 2.5]) {
+        const diff = Math.abs(ratio - simple);
+        if (diff < minRatio) minRatio = diff;
+      }
+    }
+    if (minRatio > 0.08) {
+      best = candidate;
+      break;
+    }
+  }
+  return best;
+}
+
+// === Markov Chain Melody ===
+// Build transition probabilities that favour stepwise motion and small leaps.
+// Each note has weighted chances of moving to neighbours, nearby notes, or repeating.
+function buildMarkovTable(freqs) {
+  // Sort frequencies for interval calculation
+  const sorted = [...freqs].sort((a, b) => a - b);
+  const n = sorted.length;
+  const table = new Map();
+
+  for (let i = 0; i < n; i++) {
+    const weights = [];
+    for (let j = 0; j < n; j++) {
+      const step = Math.abs(i - j);
+      let w;
+      if (step === 0) w = 0.15;       // repeat same note
+      else if (step === 1) w = 0.35;   // step (most likely)
+      else if (step === 2) w = 0.22;   // small leap
+      else if (step === 3) w = 0.12;   // medium leap
+      else w = 0.04;                   // large leap (rare)
+      weights.push({ freq: sorted[j], weight: w });
+    }
+    // Normalise
+    const total = weights.reduce((s, w) => s + w.weight, 0);
+    weights.forEach(w => w.weight /= total);
+    table.set(sorted[i], weights);
+  }
+  return { sorted, table };
+}
+
+function markovNext(markov, currentFreq) {
+  const transitions = markov.table.get(currentFreq);
+  if (!transitions) return pickFrom(markov.sorted);
+  const r = Math.random();
+  let cumulative = 0;
+  for (const t of transitions) {
+    cumulative += t.weight;
+    if (r < cumulative) return t.freq;
+  }
+  return transitions[transitions.length - 1].freq;
+}
+
+// === Cellular Automata Rhythm ===
+// Elementary CA (Wolfram rules) generates note patterns.
+// Each row = one beat. Active cells map to frequencies.
+function createAutomataState(numCells) {
+  // Choose an interesting rule: 30 (chaotic), 90 (fractal), 110 (complex), 150 (interesting)
+  const rules = [30, 90, 110, 150, 60, 105];
+  const rule = rules[Math.floor(Math.random() * rules.length)];
+
+  // Start with a single cell in the centre (classic)
+  const cells = new Uint8Array(numCells);
+  cells[Math.floor(numCells / 2)] = 1;
+
+  return { rule, cells, numCells };
+}
+
+function automataStep(state) {
+  // Apply elementary CA rule to advance one generation
+  const { rule, cells, numCells } = state;
+  const next = new Uint8Array(numCells);
+  for (let i = 0; i < numCells; i++) {
+    const left = cells[(i - 1 + numCells) % numCells];
+    const centre = cells[i];
+    const right = cells[(i + 1) % numCells];
+    const pattern = (left << 2) | (centre << 1) | right;  // 0-7
+    next[i] = (rule >> pattern) & 1;
+  }
+  state.cells = next;
+  return next;
+}
+
+function automataNextFreq(state, freqs) {
+  // Advance the automaton, find active cells, pick one mapped to a frequency
+  const row = automataStep(state);
+  const activeCells = [];
+  for (let i = 0; i < row.length; i++) {
+    if (row[i]) activeCells.push(i);
+  }
+  if (activeCells.length === 0) return null;  // silent beat
+  // Map cell position to frequency
+  const cellIdx = activeCells[Math.floor(Math.random() * activeCells.length)];
+  const freqIdx = cellIdx % freqs.length;
+  return freqs[freqIdx];
+}
+
+// === Spectral Drift ===
+// Plays a fundamental with multiple harmonics that slowly drift and evolve.
+// Creates bell-like, singing-bowl textures through beating interference patterns.
+function createSpectralState(mood) {
+  const root = pickFrom(mood.freqs);
+  // Harmonics: fundamental + 2nd, 3rd, 4th, 5th, 7th (skip 6th for more complex timbre)
+  const harmonicRatios = [1, 2, 3, 4, 5, 7];
+  // Slight detuning of each harmonic creates beating patterns
+  const detunings = harmonicRatios.map(() => (Math.random() - 0.5) * 8); // ±4 cents
+  // Drift direction: each harmonic slowly moves
+  const drifts = harmonicRatios.map(() => (Math.random() - 0.5) * 0.3); // cents per second
+  return {
+    root,
+    harmonicRatios,
+    detunings,
+    drifts,
+    step: 0,
+    // Every few notes, shift to a new root from the mood palette
+    stepsUntilShift: 3 + Math.floor(Math.random() * 4)
+  };
+}
+
+function spectralAdvance(spectral, mood) {
+  spectral.step++;
+  // Evolve detunings — harmonics slowly wander
+  for (let i = 0; i < spectral.detunings.length; i++) {
+    spectral.detunings[i] += spectral.drifts[i] * 10;
+    // Soft boundaries — reverse drift direction if too far
+    if (Math.abs(spectral.detunings[i]) > 15) {
+      spectral.drifts[i] *= -0.8;
+      spectral.detunings[i] *= 0.9;
+    }
+  }
+  // Occasionally shift root frequency
+  if (spectral.step >= spectral.stepsUntilShift) {
+    spectral.step = 0;
+    spectral.stepsUntilShift = 3 + Math.floor(Math.random() * 4);
+    // Pick a new root that's harmonically related (octave, fifth, or from palette)
+    const choices = [
+      ...mood.freqs,
+      spectral.root * 0.5, // octave down
+      spectral.root * 1.5, // fifth up
+      spectral.root * 0.75 // fourth down
+    ].filter(f => f > 60 && f < 800);
+    spectral.root = pickFrom(choices);
+  }
+  return spectral.root;
+}
+
+function freqToNoteName(freq) {
+  const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const midi = Math.round(12 * Math.log2(freq / 440) + 69);
+  return noteNames[midi % 12] + Math.floor(midi / 12 - 1);
+}
+
+function createVoice(index) {
+  const mood = MOODS[currentMood];
+  const strategy = STRATEGIES[index] || 'cycles';
+  const existingCycles = voices.map(v => v.cycleLength);
+  const freq = pickFrom(mood.freqs);
+  const waveform = pickFrom(mood.waveforms);
+  const detune = rand(...mood.detuneRange);
+  const attack = rand(...mood.attackRange);
+  const sustain = rand(...mood.sustainRange);
+  const release = rand(...mood.releaseRange);
+  const noteLength = attack + sustain + release;
+  const volume = 0.04 + Math.random() * 0.06;
+
+  let cycleLength;
+  if (strategy === 'markov') {
+    // Markov voices play more frequently with shorter cycles
+    const [lo, hi] = mood.cycleRange;
+    cycleLength = generateCycleLength(mood, existingCycles) * 0.6;
+    cycleLength = Math.max(lo * 0.5, cycleLength);
+  } else if (strategy === 'automata') {
+    // Automata voices have a steady beat — shorter, more rhythmic
+    const [lo] = mood.cycleRange;
+    cycleLength = lo * 0.35 + Math.random() * lo * 0.15;
+    cycleLength = Math.max(3, cycleLength);  // minimum 3 seconds between beats
+  } else if (strategy === 'spectral') {
+    // Spectral voices: long, evolving tones — overlap with previous
+    const [lo, hi] = mood.cycleRange;
+    cycleLength = rand(lo * 0.8, hi * 0.6);
+    cycleLength = Math.max(8, cycleLength);
+  } else {
+    cycleLength = generateCycleLength(mood, existingCycles);
+  }
+
+  return {
+    index,
+    freq,
+    waveform,
+    detune,
+    attack,
+    sustain,
+    release,
+    noteLength,
+    cycleLength,
+    volume: strategy === 'automata' ? volume * 0.7 : (strategy === 'spectral' ? volume * 0.5 : volume),
+    noteName: freqToNoteName(freq),
+    strategy,
+    markov: strategy === 'markov' ? buildMarkovTable(mood.freqs) : null,
+    automata: strategy === 'automata' ? createAutomataState(8) : null,
+    spectral: strategy === 'spectral' ? createSpectralState(mood) : null,
+    nextPlay: audioCtx.currentTime + Math.random() * cycleLength,
+    isPlaying: false,
+    oscNode: null,
+    gainNode: null
+  };
+}
+
+// === Drone Layer ===
+// A continuous low tone that provides harmonic grounding.
+let droneOsc = null;
+let droneGain = null;
+let droneFilterNode = null;
+
+function startDrone() {
+  if (droneOsc) return;
+  const mood = MOODS[currentMood];
+  // Use the lowest frequency in the mood, dropped an octave
+  const baseFreq = Math.min(...mood.freqs) / 2;
+
+  droneOsc = audioCtx.createOscillator();
+  droneGain = audioCtx.createGain();
+  droneFilterNode = audioCtx.createBiquadFilter();
+
+  droneOsc.type = 'sine';
+  droneOsc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+  // Very slow, slight detuning for warmth
+  droneOsc.detune.setValueAtTime(0, audioCtx.currentTime);
+  droneOsc.detune.linearRampToValueAtTime(3, audioCtx.currentTime + 60);
+
+  // Low-pass filter to keep it gentle
+  droneFilterNode.type = 'lowpass';
+  droneFilterNode.frequency.setValueAtTime(200, audioCtx.currentTime);
+  droneFilterNode.Q.setValueAtTime(0.7, audioCtx.currentTime);
+
+  droneGain.gain.setValueAtTime(0, audioCtx.currentTime);
+  droneGain.gain.linearRampToValueAtTime(0.025, audioCtx.currentTime + 8);
+
+  const dest = reverbNode || masterGain;
+  droneOsc.connect(droneFilterNode);
+  droneFilterNode.connect(droneGain);
+  droneGain.connect(dest);
+  droneOsc.start();
+}
+
+function stopDrone() {
+  if (!droneOsc) return;
+  const now = audioCtx.currentTime;
+  droneGain.gain.linearRampToValueAtTime(0, now + 4);
+  droneOsc.stop(now + 4.1);
+  droneOsc = null;
+  droneGain = null;
+  droneFilterNode = null;
+}
+
+function updateDrone() {
+  if (!droneOsc || !playing) return;
+  const mood = MOODS[currentMood];
+  const baseFreq = Math.min(...mood.freqs) / 2;
+  // Slowly glide to new root if mood changed
+  droneOsc.frequency.linearRampToValueAtTime(baseFreq, audioCtx.currentTime + 6);
+}
+
+// === Granular Texture Layer ===
+// Many tiny overlapping sound grains creating a shimmering ambient bed.
+// Each grain: a short sine/triangle burst (50-200ms), very quiet, slightly
+// detuned from mood frequencies. The effect is pointillistic — hundreds of
+// tiny events that blur into continuous texture.
+let granularInterval = null;
+const GRAIN_DENSITY = 4; // grains per second (kept sparse for ambient feel)
+const GRAIN_VOLUME = 0.008; // very quiet — sits beneath everything
+
+function spawnGrain() {
+  if (!playing || !audioCtx) return;
+  const mood = MOODS[currentMood];
+  const now = audioCtx.currentTime;
+
+  // Pick a frequency from the mood, shifted up 1-2 octaves for shimmer
+  const baseFreq = pickFrom(mood.freqs);
+  const octaveShift = 1 + Math.floor(Math.random() * 2);
+  const freq = baseFreq * Math.pow(2, octaveShift) + (Math.random() - 0.5) * 8;
+
+  // Grain duration: 50-200ms
+  const duration = 0.05 + Math.random() * 0.15;
+
+  // Create grain oscillator
+  const osc = audioCtx.createOscillator();
+  osc.type = Math.random() > 0.7 ? 'triangle' : 'sine';
+  osc.frequency.setValueAtTime(freq, now);
+
+  // Grain envelope — quick fade in, quick fade out (Gaussian-ish)
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(0, now);
+  env.gain.linearRampToValueAtTime(GRAIN_VOLUME, now + duration * 0.3);
+  env.gain.linearRampToValueAtTime(0, now + duration);
+
+  // High-pass filter to keep grains airy
+  const hpf = audioCtx.createBiquadFilter();
+  hpf.type = 'highpass';
+  hpf.frequency.setValueAtTime(800, now);
+  hpf.Q.setValueAtTime(0.5, now);
+
+  // Slight stereo pan for width
+  const pan = audioCtx.createStereoPanner();
+  pan.pan.setValueAtTime(Math.random() * 2 - 1, now);
+
+  const dest = reverbNode || masterGain;
+  osc.connect(hpf);
+  hpf.connect(env);
+  env.connect(pan);
+  pan.connect(dest);
+
+  osc.start(now);
+  osc.stop(now + duration + 0.01);
+}
+
+function startGranular() {
+  if (granularInterval) return;
+  // Spawn grains at irregular intervals
+  function scheduleNext() {
+    if (!playing) { granularInterval = null; return; }
+    spawnGrain();
+    // Jittered timing for natural feel
+    const delay = (1000 / GRAIN_DENSITY) * (0.5 + Math.random());
+    granularInterval = setTimeout(scheduleNext, delay);
+  }
+  scheduleNext();
+}
+
+function stopGranular() {
+  if (granularInterval) {
+    clearTimeout(granularInterval);
+    granularInterval = null;
+  }
+}
+
+// === Rain Ambience Layer ===
+// Filtered noise creating gentle rain sounds. Only active during 'rain' mood.
+// Uses a noise buffer through bandpass filters + random amplitude droplets.
+let rainNodes = null;
+
+function createRainLayer() {
+  if (!audioCtx) return;
+
+  // Create noise buffer (2 seconds of white noise, looped)
+  const bufferSize = audioCtx.sampleRate * 2;
+  const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const output = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    output[i] = Math.random() * 2 - 1;
+  }
+
+  // Noise source (looping)
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = noiseBuffer;
+  noise.loop = true;
+
+  // Bandpass filter — rain is mostly mid-high frequency
+  const bandpass = audioCtx.createBiquadFilter();
+  bandpass.type = 'bandpass';
+  bandpass.frequency.value = 3000;
+  bandpass.Q.value = 0.5;
+
+  // Second filter for more natural shape
+  const highshelf = audioCtx.createBiquadFilter();
+  highshelf.type = 'highshelf';
+  highshelf.frequency.value = 6000;
+  highshelf.gain.value = -6;
+
+  // Master volume for rain (starts silent)
+  const rainGain = audioCtx.createGain();
+  rainGain.gain.value = 0;
+
+  // Stereo spread
+  const pan = audioCtx.createStereoPanner();
+  pan.pan.value = 0;
+
+  const dest = reverbNode || masterGain;
+  noise.connect(bandpass);
+  bandpass.connect(highshelf);
+  highshelf.connect(rainGain);
+  rainGain.connect(pan);
+  pan.connect(dest);
+
+  noise.start();
+
+  rainNodes = { noise, bandpass, highshelf, rainGain, pan };
+}
+
+function updateRainLayer() {
+  if (!rainNodes || !audioCtx) return;
+  const now = audioCtx.currentTime;
+  const isRaining = currentMood === 'rain';
+  const targetVol = isRaining ? 0.025 : 0;
+  // Smooth crossfade
+  rainNodes.rainGain.gain.linearRampToValueAtTime(targetVol, now + 3);
+
+  // Subtle filter modulation when raining (variation in rain intensity)
+  if (isRaining) {
+    const freq = 2500 + Math.sin(now * 0.07) * 800;
+    rainNodes.bandpass.frequency.linearRampToValueAtTime(freq, now + 0.5);
+    // Gentle stereo drift
+    rainNodes.pan.pan.linearRampToValueAtTime(Math.sin(now * 0.03) * 0.3, now + 1);
+  }
+}
+
+function stopRainLayer() {
+  if (rainNodes) {
+    try {
+      rainNodes.noise.stop();
+      rainNodes.noise.disconnect();
+    } catch(e) {}
+    rainNodes = null;
+  }
+}
+
+// Rain droplet sounds — occasional individual drop impacts
+let dropletInterval = null;
+
+function spawnDroplet() {
+  if (!playing || !audioCtx || currentMood !== 'rain') return;
+  const now = audioCtx.currentTime;
+
+  // Short noise burst through high bandpass — sounds like a single drop
+  const bufSize = audioCtx.sampleRate * 0.03; // 30ms
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / bufSize); // decaying noise
+  }
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 4000 + Math.random() * 4000;
+  filter.Q.value = 2;
+
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.006 + Math.random() * 0.008, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+  const pan = audioCtx.createStereoPanner();
+  pan.pan.value = Math.random() * 2 - 1;
+
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(pan);
+  pan.connect(reverbNode || masterGain);
+
+  src.start(now);
+  src.stop(now + 0.08);
+}
+
+function startDroplets() {
+  if (dropletInterval) return;
+  function scheduleNext() {
+    if (!playing) { dropletInterval = null; return; }
+    if (currentMood === 'rain') spawnDroplet();
+    const delay = currentMood === 'rain' ? 80 + Math.random() * 200 : 2000;
+    dropletInterval = setTimeout(scheduleNext, delay);
+  }
+  scheduleNext();
+}
+
+function stopDroplets() {
+  if (dropletInterval) {
+    clearTimeout(dropletInterval);
+    dropletInterval = null;
+  }
+}
+
+// === Wind Layer ===
+// Low-frequency filtered noise with slow amplitude modulation for gusts.
+// Intensity driven by real weather data when available.
+let windNodes = null;
+let windIntensity = 0.3; // 0-1, updated from weather
+
+function createWindLayer() {
+  if (!audioCtx) return;
+
+  // Noise buffer
+  const bufferSize = audioCtx.sampleRate * 3;
+  const noiseBuf = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = noiseBuf;
+  noise.loop = true;
+
+  // Low bandpass for wind character
+  const bp = audioCtx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 400;
+  bp.Q.value = 0.3;
+
+  // Second filter for whistle harmonics
+  const hp = audioCtx.createBiquadFilter();
+  hp.type = 'highshelf';
+  hp.frequency.value = 2000;
+  hp.gain.value = -10;
+
+  const windGain = audioCtx.createGain();
+  windGain.gain.value = 0;
+
+  // Stereo for spatial movement
+  const pan = audioCtx.createStereoPanner();
+  pan.pan.value = 0;
+
+  const dest = reverbNode || masterGain;
+  noise.connect(bp);
+  bp.connect(hp);
+  hp.connect(windGain);
+  windGain.connect(pan);
+  pan.connect(dest);
+  noise.start();
+
+  windNodes = { noise, bp, hp, windGain, pan };
+}
+
+function updateWindLayer() {
+  if (!windNodes || !audioCtx) return;
+  const now = audioCtx.currentTime;
+
+  // Wind is present in all moods but louder in fog/rain/midnight
+  const moodWindScale = {
+    dusk: 0.5, fog: 0.9, dawn: 0.4, stars: 0.3, rain: 0.7, midnight: 0.6
+  };
+  const moodScale = moodWindScale[currentMood] || 0.4;
+  const targetVol = windIntensity * moodScale * 0.02;
+
+  windNodes.windGain.gain.linearRampToValueAtTime(targetVol, now + 2);
+
+  // Gust modulation — slow sinusoidal + random
+  const gustFreq = 300 + Math.sin(now * 0.05) * 150 + Math.sin(now * 0.13) * 80;
+  windNodes.bp.frequency.linearRampToValueAtTime(gustFreq, now + 1);
+
+  // Stereo drift (wind moves)
+  windNodes.pan.pan.linearRampToValueAtTime(Math.sin(now * 0.04) * 0.5, now + 2);
+
+  // Whistle intensity varies with wind strength
+  const whistleGain = -12 + windIntensity * 6;
+  windNodes.hp.gain.linearRampToValueAtTime(whistleGain, now + 1);
+}
+
+function stopWindLayer() {
+  if (windNodes) {
+    try { windNodes.noise.stop(); windNodes.noise.disconnect(); } catch(e) {}
+    windNodes = null;
+  }
+}
+
+// Fetch real wind speed from Open-Meteo (same API as weather mood check)
+async function fetchWindSpeed() {
+  try {
+    const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=51.51&longitude=-0.13&current=wind_speed_10m&timezone=Europe/London');
+    if (!res.ok) return;
+    const data = await res.json();
+    const speed = data.current?.wind_speed_10m || 0;
+    // wind: 0-50 km/h typical range → 0-1
+    windIntensity = Math.min(1, speed / 40);
+    const note = document.getElementById('weatherNote');
+    if (note && note.textContent) {
+      note.textContent = note.textContent.replace(/( — wind:.*|$)/, ` — wind: ${speed.toFixed(0)} km/h`);
+    }
+  } catch(e) { /* silent fail — use default */ }
+}
+
+function playVoiceNote(voice) {
+  if (!playing || !audioCtx) return;
+
+  const mood = MOODS[currentMood];
+
+  // Markov voices: advance to next note before playing
+  if (voice.strategy === 'markov' && voice.markov) {
+    voice.freq = markovNext(voice.markov, voice.freq);
+    voice.noteName = freqToNoteName(voice.freq);
+    voice.attack = rand(...mood.attackRange);
+    voice.sustain = rand(...mood.sustainRange) * 0.7;
+    voice.release = rand(...mood.releaseRange) * 0.8;
+    voice.noteLength = voice.attack + voice.sustain + voice.release;
+  }
+
+  // Automata voices: CA determines which note plays (or silence)
+  if (voice.strategy === 'automata' && voice.automata) {
+    const nextFreq = automataNextFreq(voice.automata, mood.freqs);
+    if (!nextFreq) return;  // silent beat — CA row was all zeros
+    voice.freq = nextFreq;
+    voice.noteName = freqToNoteName(voice.freq);
+    // Automata notes: crisp attack, short sustain — more percussive feel
+    voice.attack = rand(0.01, 0.05);
+    voice.sustain = rand(0.1, 0.4);
+    voice.release = rand(...mood.releaseRange) * 0.5;
+    voice.noteLength = voice.attack + voice.sustain + voice.release;
+  }
+
+  // Spectral voices: evolving harmonic series with beating patterns
+  if (voice.strategy === 'spectral' && voice.spectral) {
+    voice.freq = spectralAdvance(voice.spectral, mood);
+    voice.noteName = freqToNoteName(voice.freq) + '*';
+    // Long, slow envelopes for spectral wash
+    voice.attack = rand(...mood.attackRange) * 1.5;
+    voice.sustain = rand(...mood.sustainRange) * 1.2;
+    voice.release = rand(...mood.releaseRange) * 1.5;
+    voice.noteLength = voice.attack + voice.sustain + voice.release;
+  }
+
+  const now = audioCtx.currentTime;
+  const dest = reverbNode || masterGain;
+
+  // Main tone
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = voice.waveform;
+  osc.frequency.setValueAtTime(voice.freq, now);
+  osc.detune.setValueAtTime(voice.detune, now);
+
+  // Slight random pitch drift — like a human musician
+  const drift = (Math.random() - 0.5) * 4;
+  osc.detune.linearRampToValueAtTime(voice.detune + drift, now + voice.noteLength);
+
+  // ADSR envelope
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(voice.volume, now + voice.attack);
+  gain.gain.setValueAtTime(voice.volume, now + voice.attack + voice.sustain);
+  gain.gain.linearRampToValueAtTime(0, now + voice.noteLength);
+
+  osc.connect(gain);
+  gain.connect(dest);
+  osc.start(now);
+  osc.stop(now + voice.noteLength + 0.1);
+
+  // Spectral voices: create full harmonic series instead of the normal overtone logic
+  if (voice.strategy === 'spectral' && voice.spectral) {
+    const sp = voice.spectral;
+    // Volume falloff per harmonic: 1/n for natural timbre
+    for (let h = 1; h < sp.harmonicRatios.length; h++) {
+      const ratio = sp.harmonicRatios[h];
+      const hFreq = voice.freq * ratio;
+      if (hFreq > 8000) continue; // skip inaudible highs
+      const hVol = voice.volume / (ratio * 0.7); // natural falloff
+      const hOsc = audioCtx.createOscillator();
+      const hGain = audioCtx.createGain();
+      hOsc.type = 'sine';
+      hOsc.frequency.setValueAtTime(hFreq, now);
+      hOsc.detune.setValueAtTime(sp.detunings[h], now);
+      // Drift the detuning over the note's duration for evolving texture
+      hOsc.detune.linearRampToValueAtTime(sp.detunings[h] + sp.drifts[h] * voice.noteLength, now + voice.noteLength);
+      // Staggered envelopes: higher harmonics fade faster
+      const hDecay = voice.noteLength * (1 - h * 0.1);
+      hGain.gain.setValueAtTime(0, now);
+      hGain.gain.linearRampToValueAtTime(hVol, now + voice.attack * (1 + h * 0.1));
+      hGain.gain.setValueAtTime(hVol * 0.8, now + voice.attack * (1 + h * 0.1) + voice.sustain * 0.5);
+      hGain.gain.linearRampToValueAtTime(0, now + Math.max(voice.attack + 1, hDecay));
+      hOsc.connect(hGain);
+      hGain.connect(dest);
+      hOsc.start(now);
+      hOsc.stop(now + Math.max(voice.attack + 1, hDecay) + 0.1);
+    }
+    return; // skip normal overtone logic for spectral voices
+  }
+
+  // Harmonic overtone — an octave above at lower volume, gives bell-like quality
+  const overtone = audioCtx.createOscillator();
+  const otGain = audioCtx.createGain();
+  overtone.type = 'sine';
+  overtone.frequency.setValueAtTime(voice.freq * 2, now);
+  overtone.detune.setValueAtTime(voice.detune + (Math.random() - 0.5) * 6, now);
+  otGain.gain.setValueAtTime(0, now);
+  otGain.gain.linearRampToValueAtTime(voice.volume * 0.15, now + voice.attack * 0.7);
+  otGain.gain.linearRampToValueAtTime(0, now + voice.noteLength * 0.6);
+  overtone.connect(otGain);
+  otGain.connect(dest);
+  overtone.start(now);
+  overtone.stop(now + voice.noteLength * 0.6 + 0.1);
+
+  // Occasional fifth overtone (×3) — very quiet, adds shimmer
+  if (Math.random() > 0.6) {
+    const fifth = audioCtx.createOscillator();
+    const fGain = audioCtx.createGain();
+    fifth.type = 'sine';
+    fifth.frequency.setValueAtTime(voice.freq * 3, now);
+    fifth.detune.setValueAtTime((Math.random() - 0.5) * 10, now);
+    fGain.gain.setValueAtTime(0, now);
+    fGain.gain.linearRampToValueAtTime(voice.volume * 0.05, now + voice.attack);
+    fGain.gain.linearRampToValueAtTime(0, now + voice.noteLength * 0.4);
+    fifth.connect(fGain);
+    fGain.connect(dest);
+    fifth.start(now);
+    fifth.stop(now + voice.noteLength * 0.4 + 0.1);
+  }
+
+  // Occasional sub-octave (÷2) — adds warmth and depth
+  if (Math.random() > 0.75 && voice.freq > 150) {
+    const sub = audioCtx.createOscillator();
+    const sGain = audioCtx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(voice.freq / 2, now);
+    sGain.gain.setValueAtTime(0, now);
+    sGain.gain.linearRampToValueAtTime(voice.volume * 0.2, now + voice.attack * 1.2);
+    sGain.gain.setValueAtTime(voice.volume * 0.2, now + voice.attack * 1.2 + voice.sustain);
+    sGain.gain.linearRampToValueAtTime(0, now + voice.noteLength * 0.9);
+    sub.connect(sGain);
+    sGain.connect(dest);
+    sub.start(now);
+    sub.stop(now + voice.noteLength * 0.9 + 0.1);
+  }
+
+  voice.isPlaying = true;
+  voice.oscNode = osc;
+  voice.gainNode = gain;
+
+  osc.onended = () => {
+    voice.isPlaying = false;
+    voice.oscNode = null;
+    voice.gainNode = null;
+  };
+
+  // Schedule next play
+  voice.nextPlay = now + voice.cycleLength;
+}
+
+function createReverb() {
+  // Simple convolution-like reverb using delay lines
+  const convolver = audioCtx.createConvolver();
+  const sampleRate = audioCtx.sampleRate;
+  const length = sampleRate * 4; // 4 second reverb tail
+  const impulse = audioCtx.createBuffer(2, length, sampleRate);
+
+  for (let ch = 0; ch < 2; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      // Exponential decay with some diffusion
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.5);
+    }
+  }
+
+  convolver.buffer = impulse;
+
+  // Wet/dry mix
+  const dryGain = audioCtx.createGain();
+  const wetGain = audioCtx.createGain();
+  dryGain.gain.value = 0.6;
+  wetGain.gain.value = 0.4;
+
+  // Create a routing node
+  const input = audioCtx.createGain();
+  input.connect(dryGain);
+  input.connect(convolver);
+  convolver.connect(wetGain);
+  dryGain.connect(masterGain);
+  wetGain.connect(masterGain);
+
+  return input;
+}
+
+function initAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.8;
+
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  masterGain.connect(analyser);
+  analyser.connect(audioCtx.destination);
+
+  reverbNode = createReverb();
+
+  // Create voices
+  voices = [];
+  for (let i = 0; i < NUM_VOICES; i++) {
+    voices.push(createVoice(i));
+  }
+
+  // Start drone layer
+  startDrone();
+  // Start granular texture layer
+  startGranular();
+  // Start rain ambience layer
+  createRainLayer();
+  startDroplets();
+  // Start wind layer
+  createWindLayer();
+  fetchWindSpeed();
+  setInterval(fetchWindSpeed, 300000); // refresh wind every 5 min
+
+  buildVoiceUI();
+}
+
+// === Main loop ===
+let loopInterval = null;
+
+function mainLoop() {
+  if (!playing || !audioCtx) return;
+
+  const now = audioCtx.currentTime;
+  for (const voice of voices) {
+    if (now >= voice.nextPlay && !voice.isPlaying) {
+      playVoiceNote(voice);
+    }
+  }
+
+  updateRainLayer();
+  updateWindLayer();
+  updateVoiceUI();
+  updateStatus();
+}
+
+// === UI ===
+function buildVoiceUI() {
+  const grid = document.getElementById('voiceGrid');
+  grid.innerHTML = '';
+  voices.forEach((v, i) => {
+    const div = document.createElement('div');
+    div.className = 'voice';
+    div.id = `voice-${i}`;
+    const stratLabel = v.strategy === 'markov' ? 'melody' : v.strategy === 'automata' ? `rule ${v.automata.rule}` : v.strategy === 'spectral' ? 'spectral' : 'cycle';
+    div.innerHTML = `
+      <div class="voice-name">voice ${i + 1} · ${stratLabel}</div>
+      <div class="voice-note">${v.noteName}</div>
+      <div class="voice-cycle">${v.cycleLength.toFixed(1)}s</div>
+    `;
+    grid.appendChild(div);
+  });
+}
+
+function updateVoiceUI() {
+  voices.forEach((v, i) => {
+    const el = document.getElementById(`voice-${i}`);
+    if (el) {
+      el.classList.toggle('active', v.isPlaying);
+      // Update note display for Markov and automata voices (they change notes)
+      if (v.strategy === 'markov' || v.strategy === 'automata') {
+        const noteEl = el.querySelector('.voice-note');
+        if (noteEl && noteEl.textContent !== v.noteName) {
+          noteEl.textContent = v.noteName;
+        }
+      }
+    }
+  });
+}
+
+function buildMoodUI() {
+  const container = document.getElementById('moodControls');
+  container.innerHTML = '';
+  for (const key of Object.keys(MOODS)) {
+    const btn = document.createElement('button');
+    btn.className = `mood-btn${key === currentMood ? ' active' : ''}`;
+    btn.textContent = key;
+    btn.title = MOODS[key].description;
+    btn.onclick = () => changeMood(key);
+    container.appendChild(btn);
+  }
+}
+
+function changeMood(moodName) {
+  if (moodName === currentMood) return;
+  currentMood = moodName;
+
+  // Fade out existing voices and recreate
+  for (const v of voices) {
+    if (v.gainNode) {
+      v.gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 2);
+    }
+  }
+
+  setTimeout(() => {
+    voices = [];
+    for (let i = 0; i < NUM_VOICES; i++) {
+      voices.push(createVoice(i));
+    }
+    buildVoiceUI();
+    // Glide drone to new root
+    updateDrone();
+  }, 2500);
+
+  // Update mood buttons
+  document.querySelectorAll('.mood-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent === moodName);
+  });
+}
+
+function updateStatus() {
+  const el = document.getElementById('status');
+  if (!el || !audioCtx) return;
+  const elapsed = Math.floor(audioCtx.currentTime);
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  const activeCount = voices.filter(v => v.isPlaying).length;
+  const markovCount = voices.filter(v => v.strategy === 'markov').length;
+  const spectralCount = voices.filter(v => v.strategy === 'spectral').length;
+  el.textContent = `${m}:${s.toString().padStart(2, '0')} elapsed · ${activeCount}/${NUM_VOICES} voices · ${markovCount} melodic${spectralCount ? ' · ' + spectralCount + ' spectral' : ''} · granular${currentMood === 'rain' ? ' · rain' : ''} · mood: ${currentMood}`;
+}
+
+function togglePlay() {
+  const btn = document.getElementById('startBtn');
+  if (!playing) {
+    if (!audioCtx) initAudio();
+    else { audioCtx.resume(); startDrone(); startGranular(); }
+    playing = true;
+    btn.textContent = 'pause';
+    btn.classList.add('playing');
+    document.getElementById('controls').classList.add('visible');
+    buildMoodUI();
+    if (!loopInterval) loopInterval = setInterval(mainLoop, 200);
+    initViz();
+  } else {
+    playing = false;
+    btn.textContent = 'listen';
+    btn.classList.remove('playing');
+    stopDrone();
+    stopGranular();
+    stopRainLayer();
+    stopDroplets();
+    if (loopInterval) { clearInterval(loopInterval); loopInterval = null; }
+    if (vizAnimId) { cancelAnimationFrame(vizAnimId); vizAnimId = null; }
+  }
+}
+
+// === Weather-aware mood ===
+// Fetches local weather and sets mood accordingly
+
+function weatherToMood(code, hour, temp) {
+  // WMO weather codes → mood
+  // 0-1: clear → stars (night) or dawn (morning) or dusk (evening)
+  // 2-3: cloudy → dusk
+  // 45-48: fog → fog
+  // 51-57: drizzle → rain
+  // 61-67: rain → rain
+  // 71-77: snow → fog
+  // 80-82: showers → rain
+  // 95-99: thunderstorm → rain
+
+  if (code >= 45 && code <= 48) return 'fog';
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 99)) return 'rain';
+  if (code >= 71 && code <= 77) return 'fog';
+
+  // Clear/cloudy — depends on time of day
+  if (hour >= 5 && hour <= 8) return 'dawn';
+  if (hour >= 19 || hour <= 4) return 'stars';
+  return 'dusk';
+}
+
+async function checkWeatherMood() {
+  try {
+    const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=51.51&longitude=-0.13&current=temperature_2m,weather_code&timezone=Europe/London');
+    const data = await res.json();
+    const code = data.current.weather_code;
+    const temp = data.current.temperature_2m;
+    const hour = new Date().getHours();
+    const mood = weatherToMood(code, hour, temp);
+
+    const codeNames = {0:'clear',1:'mostly clear',2:'partly cloudy',3:'overcast',
+      45:'fog',48:'rime fog',51:'light drizzle',53:'drizzle',55:'heavy drizzle',
+      61:'light rain',63:'rain',65:'heavy rain',71:'light snow',80:'showers',95:'thunderstorm'};
+    const desc = codeNames[code] || ('code ' + code);
+
+    document.getElementById('weatherNote').textContent =
+      `${temp}°C, ${desc} locally — mood: ${mood}`;
+
+    lastWeatherMood = mood;
+    if (playing && mood !== currentMood) {
+      changeMood(mood);
+    } else if (!playing) {
+      currentMood = mood;
+    }
+  } catch(e) {
+    // Weather unavailable — just use default mood
+  }
+}
+
+// === Auto-Mood Drift ===
+// Smoothly transition between moods based on time progression.
+// Weather overrides, but between checks, time-of-day naturally shifts the mood.
+let lastWeatherMood = null;
+let moodDriftInterval = null;
+
+function timeMood() {
+  const hour = new Date().getHours() + new Date().getMinutes() / 60;
+  if (hour >= 5 && hour < 7.5) return 'dawn';
+  if (hour >= 7.5 && hour < 17) return 'dusk';  // daytime default
+  if (hour >= 17 && hour < 19.5) return 'dusk';
+  if (hour >= 19.5 && hour < 22) return 'stars';
+  return 'midnight';  // late night
+}
+
+function moodDrift() {
+  if (!playing) return;
+  // Only drift if weather hasn't forced a specific mood (rain/fog override time)
+  if (lastWeatherMood === 'rain' || lastWeatherMood === 'fog') return;
+  const suggested = timeMood();
+  if (suggested !== currentMood) {
+    changeMood(suggested);
+  }
+}
+
+// Check weather on load and every 30 minutes
+checkWeatherMood();
+setInterval(checkWeatherMood, 30 * 60 * 1000);
+// Check time-based mood drift every 10 minutes
+setInterval(moodDrift, 10 * 60 * 1000);
+
+// === Visualisation ===
+// Subtle particle/waveform display reacting to the audio
+
+function initViz() {
+  vizCanvas = document.getElementById('viz');
+  vizCtx = vizCanvas.getContext('2d');
+  resizeViz();
+  window.addEventListener('resize', resizeViz);
+  drawViz();
+}
+
+function resizeViz() {
+  if (!vizCanvas) return;
+  vizCanvas.width = window.innerWidth;
+  vizCanvas.height = window.innerHeight;
+}
+
+const particles = [];
+for (let i = 0; i < 60; i++) {
+  particles.push({
+    x: Math.random(),
+    y: Math.random(),
+    vx: (Math.random() - 0.5) * 0.0003,
+    vy: (Math.random() - 0.5) * 0.0003,
+    r: 1 + Math.random() * 2,
+    alpha: 0.05 + Math.random() * 0.1
+  });
+}
+
+function drawViz() {
+  if (!playing) return;
+  vizAnimId = requestAnimationFrame(drawViz);
+
+  const w = vizCanvas.width;
+  const h = vizCanvas.height;
+
+  // Slow fade
+  vizCtx.fillStyle = 'rgba(6, 8, 16, 0.15)';
+  vizCtx.fillRect(0, 0, w, h);
+
+  // Get audio data
+  let dataArray = null;
+  if (analyser) {
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(dataArray);
+  }
+
+  // Average level
+  let avgLevel = 0;
+  if (dataArray) {
+    for (let i = 0; i < dataArray.length; i++) avgLevel += dataArray[i];
+    avgLevel /= dataArray.length * 255;
+  }
+
+  // Draw particles — gently influenced by audio
+  for (const p of particles) {
+    p.x += p.vx + (avgLevel * 0.001 * (Math.random() - 0.5));
+    p.y += p.vy + (avgLevel * 0.0005 * (Math.random() - 0.5));
+
+    // Wrap
+    if (p.x < 0) p.x = 1;
+    if (p.x > 1) p.x = 0;
+    if (p.y < 0) p.y = 1;
+    if (p.y > 1) p.y = 0;
+
+    const px = p.x * w;
+    const py = p.y * h;
+    const a = p.alpha + avgLevel * 0.15;
+
+    vizCtx.beginPath();
+    vizCtx.arc(px, py, p.r + avgLevel * 3, 0, Math.PI * 2);
+    vizCtx.fillStyle = `rgba(100, 150, 220, ${a})`;
+    vizCtx.fill();
+
+    // Glow
+    vizCtx.beginPath();
+    vizCtx.arc(px, py, p.r * 4 + avgLevel * 10, 0, Math.PI * 2);
+    vizCtx.fillStyle = `rgba(80, 130, 200, ${a * 0.15})`;
+    vizCtx.fill();
+  }
+
+  // Draw connections between nearby particles
+  for (let i = 0; i < particles.length; i++) {
+    for (let j = i + 1; j < particles.length; j++) {
+      const dx = (particles[i].x - particles[j].x) * w;
+      const dy = (particles[i].y - particles[j].y) * h;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 150) {
+        const a = (1 - dist / 150) * 0.04 * (1 + avgLevel * 2);
+        vizCtx.strokeStyle = `rgba(80, 140, 210, ${a})`;
+        vizCtx.lineWidth = 0.5;
+        vizCtx.beginPath();
+        vizCtx.moveTo(particles[i].x * w, particles[i].y * h);
+        vizCtx.lineTo(particles[j].x * w, particles[j].y * h);
+        vizCtx.stroke();
+      }
+    }
+  }
+
+  // Waveform at bottom — very subtle
+  if (analyser) {
+    const timeData = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteTimeDomainData(timeData);
+
+    vizCtx.strokeStyle = `rgba(80, 130, 200, ${0.08 + avgLevel * 0.15})`;
+    vizCtx.lineWidth = 1;
+    vizCtx.beginPath();
+    const sliceWidth = w / timeData.length;
+    for (let i = 0; i < timeData.length; i++) {
+      const v = timeData[i] / 128.0;
+      const y = h * 0.85 + (v - 1) * 40;
+      if (i === 0) vizCtx.moveTo(0, y);
+      else vizCtx.lineTo(i * sliceWidth, y);
+    }
+    vizCtx.stroke();
+  }
+}
+</script>
+</body>
+</html>

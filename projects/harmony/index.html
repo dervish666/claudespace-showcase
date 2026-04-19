@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>~ Harmony</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a12;
+  color: #c8c8d8;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+header {
+  padding: 1.5rem 2rem 1rem;
+  border-bottom: 1px solid #1a1a2e;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+header h1 { font-size: 1.3rem; font-weight: 300; color: #e0e0e8; letter-spacing: 0.05em; }
+header span { font-size: 0.75rem; color: #555; }
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #1a1a2e;
+  background: #0d0d18;
+}
+.tab {
+  padding: 0.7rem 1.5rem;
+  cursor: pointer;
+  color: #666;
+  font-size: 0.85rem;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+.tab:hover { color: #aaa; }
+.tab.active { color: #e0e0e8; border-bottom-color: #5588cc; }
+.panel { display: none; padding: 2rem; }
+.panel.active { display: block; }
+
+/* Circle of Fifths */
+#circle-panel { text-align: center; }
+#circle-canvas { cursor: pointer; max-width: 100%; }
+.key-info {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  background: #0f0f1a;
+  border: 1px solid #1a1a2e;
+  border-radius: 8px;
+  display: inline-block;
+  min-width: 400px;
+  text-align: left;
+}
+.key-info h2 { font-size: 1.1rem; font-weight: 400; margin-bottom: 0.8rem; color: #88aadd; }
+.key-info .notes { font-size: 1.2rem; letter-spacing: 0.1em; margin-bottom: 0.5rem; }
+.key-info .detail { font-size: 0.8rem; color: #777; margin-top: 0.3rem; }
+.play-btn {
+  background: #1a2a40;
+  border: 1px solid #2a3a55;
+  color: #88aadd;
+  padding: 0.4rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  transition: all 0.2s;
+}
+.play-btn:hover { background: #243a55; border-color: #3a5a88; }
+
+/* Scales */
+#scales-panel .controls {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+  align-items: center;
+}
+select, button {
+  background: #141420;
+  border: 1px solid #2a2a40;
+  color: #c8c8d8;
+  padding: 0.5rem 0.8rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+select:focus { outline: 1px solid #5588cc; }
+.keyboard-wrap {
+  background: #0f0f1a;
+  border: 1px solid #1a1a2e;
+  border-radius: 8px;
+  padding: 1.5rem;
+  overflow-x: auto;
+}
+#keyboard-canvas { display: block; margin: 0 auto; }
+.scale-info {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #0f0f1a;
+  border: 1px solid #1a1a2e;
+  border-radius: 8px;
+}
+.scale-formula {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.interval-badge {
+  background: #1a2540;
+  padding: 0.25rem 0.6rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+  color: #88aadd;
+}
+.interval-badge.root { background: #2a4060; color: #aaccff; }
+
+/* Chords */
+#chords-panel .chord-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.chord-card {
+  background: #0f0f1a;
+  border: 1px solid #1a1a2e;
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.chord-card:hover { border-color: #3a3a5e; transform: translateY(-2px); }
+.chord-card.playing { border-color: #5588cc; background: #141428; }
+.chord-card h3 { font-size: 1rem; color: #88aadd; margin-bottom: 0.3rem; }
+.chord-card .chord-notes { font-size: 0.85rem; color: #888; }
+.chord-card .chord-type { font-size: 0.75rem; color: #555; margin-top: 0.3rem; }
+#chord-staff { margin-top: 1.5rem; text-align: center; }
+
+/* Ear Training */
+#ear-panel { max-width: 600px; margin: 0 auto; }
+.ear-prompt {
+  text-align: center;
+  padding: 2rem;
+  background: #0f0f1a;
+  border: 1px solid #1a1a2e;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+.ear-prompt h2 { font-size: 1.2rem; font-weight: 400; color: #e0e0e8; margin-bottom: 1rem; }
+.ear-prompt .big-play {
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  background: #1a2a40;
+  border: 2px solid #3a5a88;
+  color: #88aadd;
+  font-size: 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ear-prompt .big-play:hover { background: #243a55; transform: scale(1.1); }
+.answers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+}
+.answer-btn {
+  background: #141420;
+  border: 1px solid #2a2a40;
+  color: #c8c8d8;
+  padding: 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.15s;
+}
+.answer-btn:hover { background: #1a1a30; border-color: #3a3a55; }
+.answer-btn.correct { background: #1a3a1a; border-color: #3a7a3a; color: #88dd88; }
+.answer-btn.wrong { background: #3a1a1a; border-color: #7a3a3a; color: #dd8888; }
+.score-bar {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1.5rem;
+  padding: 0.8rem 1rem;
+  background: #0f0f1a;
+  border: 1px solid #1a1a2e;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: #888;
+}
+.score-bar .streak { color: #88aadd; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Harmony</h1>
+  <span>interactive music theory</span>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab('circle')">Circle of Fifths</div>
+  <div class="tab" onclick="showTab('scales')">Scales</div>
+  <div class="tab" onclick="showTab('chords')">Chords</div>
+  <div class="tab" onclick="showTab('ear')">Ear Training</div>
+</div>
+
+<div id="circle-panel" class="panel active">
+  <canvas id="circle-canvas" width="600" height="600"></canvas>
+  <div class="key-info" id="key-info">
+    <h2 id="key-title">C Major / A minor</h2>
+    <div class="notes" id="key-notes">C D E F G A B</div>
+    <div class="detail" id="key-sharps">No sharps or flats</div>
+    <div class="detail" id="key-relative">Relative minor: A minor</div>
+    <button class="play-btn" onclick="playScale(selectedKey, 'major')">&#9654; Play scale</button>
+    <button class="play-btn" onclick="playChordProgression(selectedKey)">&#9654; I-IV-V-I</button>
+  </div>
+</div>
+
+<div id="scales-panel" class="panel">
+  <div class="controls">
+    <select id="scale-root" onchange="updateScale()">
+      <option>C</option><option>C#</option><option>D</option><option>Eb</option>
+      <option>E</option><option>F</option><option>F#</option><option>G</option>
+      <option>Ab</option><option>A</option><option>Bb</option><option>B</option>
+    </select>
+    <select id="scale-mode" onchange="updateScale()">
+      <option value="major">Major (Ionian)</option>
+      <option value="dorian">Dorian</option>
+      <option value="phrygian">Phrygian</option>
+      <option value="lydian">Lydian</option>
+      <option value="mixolydian">Mixolydian</option>
+      <option value="minor">Natural Minor (Aeolian)</option>
+      <option value="locrian">Locrian</option>
+      <option value="harmonic_minor">Harmonic Minor</option>
+      <option value="melodic_minor">Melodic Minor</option>
+      <option value="pentatonic_major">Major Pentatonic</option>
+      <option value="pentatonic_minor">Minor Pentatonic</option>
+      <option value="blues">Blues</option>
+      <option value="whole_tone">Whole Tone</option>
+      <option value="chromatic">Chromatic</option>
+    </select>
+    <button class="play-btn" onclick="playCurrentScale()">&#9654; Play</button>
+    <button class="play-btn" onclick="playCurrentScaleDown()">&#9654; Descending</button>
+  </div>
+  <div class="keyboard-wrap">
+    <canvas id="keyboard-canvas" width="900" height="180"></canvas>
+  </div>
+  <div class="scale-info" id="scale-info">
+    <div id="scale-notes-display"></div>
+    <div class="scale-formula" id="scale-formula"></div>
+  </div>
+</div>
+
+<div id="chords-panel" class="panel">
+  <div class="controls">
+    <select id="chord-root" onchange="updateChords()">
+      <option>C</option><option>C#</option><option>D</option><option>Eb</option>
+      <option>E</option><option>F</option><option>F#</option><option>G</option>
+      <option>Ab</option><option>A</option><option>Bb</option><option>B</option>
+    </select>
+    <span style="color:#666; font-size:0.85rem;">Click a chord to hear it</span>
+  </div>
+  <div class="chord-grid" id="chord-grid"></div>
+</div>
+
+<div id="ear-panel" class="panel">
+  <div class="ear-prompt">
+    <h2 id="ear-title">Identify the interval</h2>
+    <button class="big-play" onclick="replayInterval()">&#9654;</button>
+    <div class="detail" style="margin-top:0.8rem;" id="ear-hint"></div>
+  </div>
+  <div class="answers" id="ear-answers"></div>
+  <div class="score-bar">
+    <span>Score: <span id="ear-score">0</span> / <span id="ear-total">0</span></span>
+    <span class="streak">Streak: <span id="ear-streak">0</span></span>
+    <button class="play-btn" onclick="newEarQuestion()">Next</button>
+  </div>
+</div>
+
+<script>
+// ============ AUDIO ENGINE ============
+let audioCtx = null;
+function getAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+const NOTE_NAMES = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
+const ENHARMONIC = {'Db':'C#','D#':'Eb','Gb':'F#','G#':'Ab','A#':'Bb'};
+
+function noteToMidi(name, octave) {
+  const n = ENHARMONIC[name] || name;
+  return NOTE_NAMES.indexOf(n) + (octave + 1) * 12;
+}
+
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function playNote(midi, duration = 0.6, startTime = 0, volume = 0.15) {
+  const ctx = getAudio();
+  const freq = midiToFreq(midi);
+  const t = ctx.currentTime + startTime;
+
+  // Rich tone: fundamental + soft overtones
+  const gain = ctx.createGain();
+  gain.connect(ctx.destination);
+  gain.gain.setValueAtTime(0, t);
+  gain.gain.linearRampToValueAtTime(volume, t + 0.02);
+  gain.gain.setValueAtTime(volume, t + duration * 0.7);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.value = freq;
+  osc.connect(gain);
+  osc.start(t);
+  osc.stop(t + duration);
+
+  // Soft second harmonic
+  const gain2 = ctx.createGain();
+  gain2.connect(ctx.destination);
+  gain2.gain.setValueAtTime(0, t);
+  gain2.gain.linearRampToValueAtTime(volume * 0.15, t + 0.02);
+  gain2.gain.exponentialRampToValueAtTime(0.001, t + duration * 0.8);
+
+  const osc2 = ctx.createOscillator();
+  osc2.type = 'sine';
+  osc2.frequency.value = freq * 2;
+  osc2.connect(gain2);
+  osc2.start(t);
+  osc2.stop(t + duration);
+}
+
+function playChord(midis, duration = 1.2, startTime = 0) {
+  midis.forEach(m => playNote(m, duration, startTime, 0.1));
+}
+
+// ============ MUSIC THEORY DATA ============
+const SCALE_INTERVALS = {
+  major:           [0, 2, 4, 5, 7, 9, 11],
+  dorian:          [0, 2, 3, 5, 7, 9, 10],
+  phrygian:        [0, 1, 3, 5, 7, 8, 10],
+  lydian:          [0, 2, 4, 6, 7, 9, 11],
+  mixolydian:      [0, 2, 4, 5, 7, 9, 10],
+  minor:           [0, 2, 3, 5, 7, 8, 10],
+  locrian:         [0, 1, 3, 5, 6, 8, 10],
+  harmonic_minor:  [0, 2, 3, 5, 7, 8, 11],
+  melodic_minor:   [0, 2, 3, 5, 7, 9, 11],
+  pentatonic_major:[0, 2, 4, 7, 9],
+  pentatonic_minor:[0, 3, 5, 7, 10],
+  blues:           [0, 3, 5, 6, 7, 10],
+  whole_tone:      [0, 2, 4, 6, 8, 10],
+  chromatic:       [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+};
+
+const INTERVAL_NAMES = [
+  'Unison', 'Minor 2nd', 'Major 2nd', 'Minor 3rd', 'Major 3rd',
+  'Perfect 4th', 'Tritone', 'Perfect 5th', 'Minor 6th', 'Major 6th',
+  'Minor 7th', 'Major 7th', 'Octave'
+];
+
+const INTERVAL_SHORT = [
+  'P1', 'm2', 'M2', 'm3', 'M3', 'P4', 'TT', 'P5', 'm6', 'M6', 'm7', 'M7', 'P8'
+];
+
+const CHORD_TYPES = [
+  { name: 'Major',        symbol: '',      intervals: [0, 4, 7] },
+  { name: 'Minor',        symbol: 'm',     intervals: [0, 3, 7] },
+  { name: 'Diminished',   symbol: 'dim',   intervals: [0, 3, 6] },
+  { name: 'Augmented',    symbol: 'aug',   intervals: [0, 4, 8] },
+  { name: 'Major 7th',    symbol: 'maj7',  intervals: [0, 4, 7, 11] },
+  { name: 'Minor 7th',    symbol: 'm7',    intervals: [0, 3, 7, 10] },
+  { name: 'Dominant 7th', symbol: '7',     intervals: [0, 4, 7, 10] },
+  { name: 'Dim 7th',      symbol: 'dim7',  intervals: [0, 3, 6, 9] },
+  { name: 'Half-dim 7th', symbol: 'm7b5',  intervals: [0, 3, 6, 10] },
+  { name: 'Sus2',         symbol: 'sus2',  intervals: [0, 2, 7] },
+  { name: 'Sus4',         symbol: 'sus4',  intervals: [0, 5, 7] },
+  { name: 'Add9',         symbol: 'add9',  intervals: [0, 4, 7, 14] },
+];
+
+// Circle of fifths order
+const CIRCLE_MAJOR = ['C','G','D','A','E','B','F#','Db','Ab','Eb','Bb','F'];
+const CIRCLE_MINOR = ['A','E','B','F#','C#','G#','Eb','Bb','F','C','G','D'];
+const KEY_SHARPS_FLATS = [
+  '0', '1#', '2#', '3#', '4#', '5#', '6#/6b', '5b', '4b', '3b', '2b', '1b'
+];
+
+let selectedKey = 0; // index into CIRCLE_MAJOR
+
+// ============ TAB SWITCHING ============
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const panels = ['circle','scales','chords','ear'];
+    t.classList.toggle('active', panels[i] === name);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(name + '-panel').classList.add('active');
+
+  if (name === 'scales') updateScale();
+  if (name === 'chords') updateChords();
+  if (name === 'ear') { if (!earQuestion) newEarQuestion(); }
+}
+
+// ============ CIRCLE OF FIFTHS ============
+function drawCircle() {
+  const canvas = document.getElementById('circle-canvas');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const cx = w / 2, cy = h / 2;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const outerR = 250, innerR = 170, coreR = 100;
+
+  // Outer ring segments (major keys)
+  for (let i = 0; i < 12; i++) {
+    const angle = (i * 30 - 90) * Math.PI / 180;
+    const nextAngle = ((i + 1) * 30 - 90) * Math.PI / 180;
+    const midAngle = ((i + 0.5) * 30 - 90) * Math.PI / 180;
+
+    // Segment
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR, angle, nextAngle);
+    ctx.arc(cx, cy, innerR, nextAngle, angle, true);
+    ctx.closePath();
+
+    if (i === selectedKey) {
+      ctx.fillStyle = '#1a3055';
+      ctx.strokeStyle = '#4488cc';
+    } else {
+      ctx.fillStyle = '#12121e';
+      ctx.strokeStyle = '#2a2a40';
+    }
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Major key label
+    const labelR = (outerR + innerR) / 2;
+    const lx = cx + Math.cos(midAngle) * labelR;
+    const ly = cy + Math.sin(midAngle) * labelR;
+    ctx.fillStyle = i === selectedKey ? '#aaccff' : '#999';
+    ctx.font = i === selectedKey ? 'bold 18px system-ui' : '16px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(CIRCLE_MAJOR[i], lx, ly);
+  }
+
+  // Inner ring segments (minor keys)
+  for (let i = 0; i < 12; i++) {
+    const angle = (i * 30 - 90) * Math.PI / 180;
+    const nextAngle = ((i + 1) * 30 - 90) * Math.PI / 180;
+    const midAngle = ((i + 0.5) * 30 - 90) * Math.PI / 180;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, innerR, angle, nextAngle);
+    ctx.arc(cx, cy, coreR, nextAngle, angle, true);
+    ctx.closePath();
+
+    if (i === selectedKey) {
+      ctx.fillStyle = '#1a2540';
+      ctx.strokeStyle = '#4488cc';
+    } else {
+      ctx.fillStyle = '#0d0d18';
+      ctx.strokeStyle = '#1a1a30';
+    }
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Minor key label
+    const labelR = (innerR + coreR) / 2;
+    const lx = cx + Math.cos(midAngle) * labelR;
+    const ly = cy + Math.sin(midAngle) * labelR;
+    ctx.fillStyle = i === selectedKey ? '#88aacc' : '#666';
+    ctx.font = '13px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(CIRCLE_MINOR[i] + 'm', lx, ly);
+  }
+
+  // Centre
+  ctx.beginPath();
+  ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+  ctx.fillStyle = '#0a0a14';
+  ctx.fill();
+  ctx.strokeStyle = '#1a1a30';
+  ctx.stroke();
+
+  // Sharps/flats count in centre
+  ctx.fillStyle = '#555';
+  ctx.font = '12px system-ui';
+  ctx.fillText(KEY_SHARPS_FLATS[selectedKey], cx, cy - 10);
+  ctx.fillStyle = '#444';
+  ctx.font = '10px system-ui';
+  ctx.fillText('sharps/flats', cx, cy + 8);
+
+  updateKeyInfo();
+}
+
+function handleCircleClick(e) {
+  const canvas = document.getElementById('circle-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (e.clientX - rect.left) * scaleX - canvas.width / 2;
+  const y = (e.clientY - rect.top) * scaleX - canvas.height / 2;
+  const dist = Math.sqrt(x * x + y * y);
+
+  if (dist < 100 || dist > 250) return;
+
+  let angle = Math.atan2(y, x) * 180 / Math.PI + 90;
+  if (angle < 0) angle += 360;
+  const segment = Math.floor(angle / 30) % 12;
+
+  selectedKey = segment;
+  drawCircle();
+}
+
+function getScaleNotes(rootName, scaleType) {
+  const root = ENHARMONIC[rootName] || rootName;
+  const rootIdx = NOTE_NAMES.indexOf(root);
+  const intervals = SCALE_INTERVALS[scaleType];
+  return intervals.map(i => NOTE_NAMES[(rootIdx + i) % 12]);
+}
+
+function updateKeyInfo() {
+  const major = CIRCLE_MAJOR[selectedKey];
+  const minor = CIRCLE_MINOR[selectedKey];
+  document.getElementById('key-title').textContent = `${major} Major / ${minor} minor`;
+  document.getElementById('key-notes').textContent = getScaleNotes(major, 'major').join('  ');
+  document.getElementById('key-sharps').textContent = 'Key signature: ' + KEY_SHARPS_FLATS[selectedKey].replace('#', ' sharp(s)').replace('b', ' flat(s)').replace('0', 'No sharps or flats');
+  document.getElementById('key-relative').textContent = `Relative minor: ${minor} minor — ${getScaleNotes(minor, 'minor').join('  ')}`;
+}
+
+function playScale(keyIdx, type) {
+  const root = type === 'major' ? CIRCLE_MAJOR[keyIdx] : CIRCLE_MINOR[keyIdx];
+  const scaleType = type === 'major' ? 'major' : 'minor';
+  const rootMidi = noteToMidi(root, 4);
+  const intervals = SCALE_INTERVALS[scaleType];
+  intervals.forEach((interval, i) => {
+    playNote(rootMidi + interval, 0.4, i * 0.25);
+  });
+  // Resolve to octave
+  playNote(rootMidi + 12, 0.6, intervals.length * 0.25);
+}
+
+function playChordProgression(keyIdx) {
+  const root = CIRCLE_MAJOR[keyIdx];
+  const rootMidi = noteToMidi(root, 4);
+  const scale = SCALE_INTERVALS.major;
+
+  // I chord
+  playChord([rootMidi, rootMidi + 4, rootMidi + 7], 0.8, 0);
+  // IV chord
+  const iv = rootMidi + scale[3];
+  playChord([iv, iv + 4, iv + 7], 0.8, 0.9);
+  // V chord
+  const v = rootMidi + scale[4];
+  playChord([v, v + 4, v + 7], 0.8, 1.8);
+  // I chord resolve
+  playChord([rootMidi, rootMidi + 4, rootMidi + 7], 1.2, 2.7);
+}
+
+// ============ SCALES ============
+function updateScale() {
+  const root = document.getElementById('scale-root').value;
+  const mode = document.getElementById('scale-mode').value;
+  const notes = getScaleNotes(root, mode);
+  const intervals = SCALE_INTERVALS[mode];
+
+  // Draw keyboard
+  drawKeyboard(root, intervals);
+
+  // Display notes and intervals
+  const display = document.getElementById('scale-notes-display');
+  display.innerHTML = `<strong style="color:#88aadd">${root} ${document.getElementById('scale-mode').selectedOptions[0].text}</strong><br>` +
+    `<span style="font-size:1.1rem; letter-spacing:0.15em; margin-top:0.3rem; display:inline-block">${notes.join('  ')}</span>`;
+
+  const formula = document.getElementById('scale-formula');
+  formula.innerHTML = '';
+  intervals.forEach((interval, i) => {
+    const badge = document.createElement('span');
+    badge.className = 'interval-badge' + (i === 0 ? ' root' : '');
+    badge.textContent = `${notes[i]} (${INTERVAL_SHORT[interval]})`;
+    formula.appendChild(badge);
+  });
+
+  // Show step pattern
+  const steps = [];
+  for (let i = 1; i < intervals.length; i++) {
+    const diff = intervals[i] - intervals[i-1];
+    steps.push(diff === 1 ? 'H' : diff === 2 ? 'W' : diff === 3 ? 'W+H' : `${diff}`);
+  }
+  const stepBadge = document.createElement('div');
+  stepBadge.style.cssText = 'margin-top:0.8rem; font-size:0.8rem; color:#666;';
+  stepBadge.textContent = 'Steps: ' + steps.join(' - ');
+  formula.appendChild(stepBadge);
+}
+
+function drawKeyboard(rootName, scaleIntervals) {
+  const canvas = document.getElementById('keyboard-canvas');
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const rootIdx = NOTE_NAMES.indexOf(ENHARMONIC[rootName] || rootName);
+  const highlightNotes = new Set(scaleIntervals.map(i => (rootIdx + i) % 12));
+
+  // Draw 2 octaves of piano keys
+  const whiteKeys = [];
+  const blackKeys = [];
+  const whitePattern = [0, 2, 4, 5, 7, 9, 11]; // C D E F G A B
+  const blackPattern = [1, 3, 6, 8, 10]; // C# Eb F# Ab Bb
+
+  const numWhite = 15; // just over 2 octaves
+  const keyW = w / numWhite;
+  const whiteH = h - 20;
+  const blackH = whiteH * 0.6;
+  const blackW = keyW * 0.65;
+
+  // Map white key positions
+  for (let i = 0; i < numWhite; i++) {
+    const noteInOctave = whitePattern[i % 7];
+    const octave = Math.floor(i / 7);
+    whiteKeys.push({ x: i * keyW, noteIdx: noteInOctave, octave });
+  }
+
+  // Draw white keys
+  for (const key of whiteKeys) {
+    const isHighlight = highlightNotes.has(key.noteIdx);
+    const isRoot = key.noteIdx === rootIdx;
+
+    ctx.fillStyle = isRoot ? '#2a4a6a' : isHighlight ? '#1a3050' : '#e8e8e8';
+    ctx.fillRect(key.x + 1, 0, keyW - 2, whiteH);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(key.x + 1, 0, keyW - 2, whiteH);
+
+    if (isHighlight) {
+      ctx.fillStyle = isRoot ? '#aaccff' : '#6699cc';
+      ctx.font = '11px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText(NOTE_NAMES[key.noteIdx], key.x + keyW / 2, whiteH - 8);
+    }
+  }
+
+  // Draw black keys
+  const blackPositions = [0.7, 1.7, 3.7, 4.7, 5.7]; // relative to white key index
+  for (let oct = 0; oct < 3; oct++) {
+    for (let b = 0; b < blackPositions.length; b++) {
+      const pos = blackPositions[b] + oct * 7;
+      if (pos >= numWhite) continue;
+      const x = pos * keyW + keyW / 2 - blackW / 2;
+      const noteIdx = blackPattern[b];
+      const isHighlight = highlightNotes.has(noteIdx);
+      const isRoot = noteIdx === rootIdx;
+
+      ctx.fillStyle = isRoot ? '#3a5a8a' : isHighlight ? '#2a4060' : '#222';
+      ctx.fillRect(x, 0, blackW, blackH);
+      ctx.strokeStyle = '#111';
+      ctx.strokeRect(x, 0, blackW, blackH);
+
+      if (isHighlight) {
+        ctx.fillStyle = isRoot ? '#aaccff' : '#6699cc';
+        ctx.font = '9px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(NOTE_NAMES[noteIdx], x + blackW / 2, blackH - 6);
+      }
+    }
+  }
+}
+
+function playCurrentScale() {
+  const root = document.getElementById('scale-root').value;
+  const mode = document.getElementById('scale-mode').value;
+  const rootMidi = noteToMidi(root, 4);
+  const intervals = SCALE_INTERVALS[mode];
+  intervals.forEach((interval, i) => {
+    playNote(rootMidi + interval, 0.35, i * 0.22);
+  });
+  playNote(rootMidi + 12, 0.5, intervals.length * 0.22);
+}
+
+function playCurrentScaleDown() {
+  const root = document.getElementById('scale-root').value;
+  const mode = document.getElementById('scale-mode').value;
+  const rootMidi = noteToMidi(root, 4);
+  const intervals = SCALE_INTERVALS[mode];
+  const reversed = [12, ...intervals.slice().reverse()];
+  reversed.forEach((interval, i) => {
+    playNote(rootMidi + interval, 0.35, i * 0.22);
+  });
+}
+
+// ============ CHORDS ============
+function updateChords() {
+  const root = document.getElementById('chord-root').value;
+  const grid = document.getElementById('chord-grid');
+  grid.innerHTML = '';
+
+  CHORD_TYPES.forEach(chord => {
+    const rootIdx = NOTE_NAMES.indexOf(ENHARMONIC[root] || root);
+    const notes = chord.intervals.map(i => NOTE_NAMES[(rootIdx + i) % 12]);
+
+    const card = document.createElement('div');
+    card.className = 'chord-card';
+    card.innerHTML = `
+      <h3>${root}${chord.symbol}</h3>
+      <div class="chord-notes">${notes.join(' - ')}</div>
+      <div class="chord-type">${chord.name} · ${chord.intervals.map(i => INTERVAL_SHORT[i % 12]).join(' ')}</div>
+    `;
+    card.onclick = () => {
+      document.querySelectorAll('.chord-card').forEach(c => c.classList.remove('playing'));
+      card.classList.add('playing');
+      const rootMidi = noteToMidi(root, 4);
+      playChord(chord.intervals.map(i => rootMidi + i), 1.5);
+      setTimeout(() => card.classList.remove('playing'), 1500);
+    };
+    grid.appendChild(card);
+  });
+}
+
+// ============ EAR TRAINING ============
+let earQuestion = null;
+let earScore = 0, earTotal = 0, earStreak = 0;
+let earNotes = [];
+
+const EAR_INTERVALS = [
+  { semitones: 1, name: 'Minor 2nd', hint: 'Jaws theme' },
+  { semitones: 2, name: 'Major 2nd', hint: 'Happy Birthday (first two notes)' },
+  { semitones: 3, name: 'Minor 3rd', hint: 'Greensleeves' },
+  { semitones: 4, name: 'Major 3rd', hint: 'When the Saints' },
+  { semitones: 5, name: 'Perfect 4th', hint: 'Here Comes the Bride' },
+  { semitones: 6, name: 'Tritone', hint: 'The Simpsons theme' },
+  { semitones: 7, name: 'Perfect 5th', hint: 'Star Wars main theme' },
+  { semitones: 8, name: 'Minor 6th', hint: 'The Entertainer' },
+  { semitones: 9, name: 'Major 6th', hint: 'My Bonnie Lies Over the Ocean' },
+  { semitones: 10, name: 'Minor 7th', hint: 'Somewhere (West Side Story)' },
+  { semitones: 11, name: 'Major 7th', hint: 'Take On Me (chorus)' },
+  { semitones: 12, name: 'Octave', hint: 'Somewhere Over the Rainbow' },
+];
+
+function newEarQuestion() {
+  const interval = EAR_INTERVALS[Math.floor(Math.random() * EAR_INTERVALS.length)];
+  const root = 55 + Math.floor(Math.random() * 15); // MIDI range ~G3 to ~G#4
+  const direction = Math.random() < 0.8 ? 1 : -1; // mostly ascending
+  earNotes = [root, root + interval.semitones * direction];
+  earQuestion = interval;
+
+  document.getElementById('ear-hint').textContent = '';
+  document.getElementById('ear-title').textContent = 'Identify the interval';
+
+  // Build answer buttons
+  const answersDiv = document.getElementById('ear-answers');
+  answersDiv.innerHTML = '';
+  EAR_INTERVALS.forEach(opt => {
+    const btn = document.createElement('button');
+    btn.className = 'answer-btn';
+    btn.textContent = opt.name;
+    btn.onclick = () => checkEarAnswer(opt, btn);
+    answersDiv.appendChild(btn);
+  });
+
+  // Play it
+  setTimeout(() => {
+    playNote(earNotes[0], 0.5, 0, 0.2);
+    playNote(earNotes[1], 0.5, 0.6, 0.2);
+  }, 300);
+}
+
+function replayInterval() {
+  if (!earNotes.length) { newEarQuestion(); return; }
+  playNote(earNotes[0], 0.5, 0, 0.2);
+  playNote(earNotes[1], 0.5, 0.6, 0.2);
+}
+
+function checkEarAnswer(chosen, btn) {
+  earTotal++;
+  if (chosen.semitones === earQuestion.semitones) {
+    btn.classList.add('correct');
+    earScore++;
+    earStreak++;
+    document.getElementById('ear-hint').textContent = `Correct! ${earQuestion.hint}`;
+  } else {
+    btn.classList.add('wrong');
+    earStreak = 0;
+    // Highlight correct answer
+    document.querySelectorAll('.answer-btn').forEach(b => {
+      if (b.textContent === earQuestion.name) b.classList.add('correct');
+    });
+    document.getElementById('ear-hint').textContent = `It was ${earQuestion.name}. Think: "${earQuestion.hint}"`;
+  }
+
+  // Disable all buttons
+  document.querySelectorAll('.answer-btn').forEach(b => b.onclick = null);
+
+  document.getElementById('ear-score').textContent = earScore;
+  document.getElementById('ear-total').textContent = earTotal;
+  document.getElementById('ear-streak').textContent = earStreak;
+}
+
+// ============ INIT ============
+document.getElementById('circle-canvas').addEventListener('click', handleCircleClick);
+drawCircle();
+updateScale();
+</script>
+</body>
+</html>

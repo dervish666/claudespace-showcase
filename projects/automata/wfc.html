@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wave Function Collapse</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a12; color: #c0c8e0; font-family: 'Courier New', monospace; overflow: hidden; }
+canvas { display: block; position: fixed; top: 0; left: 0; }
+#ui {
+  position: fixed; top: 12px; right: 12px; z-index: 10;
+  background: rgba(10,10,18,0.9); backdrop-filter: blur(10px);
+  border: 1px solid rgba(100,150,255,0.15); border-radius: 10px;
+  padding: 16px 18px; width: 220px; font-size: 11px;
+  user-select: none;
+}
+#ui h2 { font-size: 11px; font-weight: 300; color: rgba(200,210,230,0.4); letter-spacing: 2.5px; margin-bottom: 12px; text-transform: uppercase; }
+.row { display: flex; justify-content: space-between; align-items: center; margin: 6px 0; }
+.row label { color: rgba(200,210,230,0.45); font-size: 10px; }
+.row .val { color: #6080ff; font-size: 10px; }
+.btns { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+.btn {
+  background: rgba(96,128,255,0.08); border: 1px solid rgba(96,128,255,0.2);
+  color: rgba(200,210,230,0.55); padding: 5px 11px; border-radius: 5px;
+  cursor: pointer; font: inherit; font-size: 10px; transition: all 0.2s;
+}
+.btn:hover { background: rgba(96,128,255,0.18); color: rgba(200,210,230,0.9); border-color: rgba(96,128,255,0.4); }
+.btn.active { border-color: #6080ff; color: #6080ff; background: rgba(96,128,255,0.15); }
+select {
+  background: rgba(20,20,30,0.9); border: 1px solid rgba(100,150,255,0.2);
+  color: #c0c8e0; padding: 4px 7px; border-radius: 4px; font: inherit; font-size: 10px;
+  outline: none;
+}
+select:focus { border-color: rgba(100,150,255,0.4); }
+#status { margin-top: 10px; color: rgba(200,210,230,0.35); font-size: 10px; line-height: 1.6; }
+.progress-bar { height: 2px; background: rgba(96,128,255,0.1); border-radius: 1px; margin-top: 8px; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, #4060c0, #6090ff); border-radius: 1px; transition: width 0.1s; }
+#tooltip {
+  position: fixed; z-index: 20; pointer-events: none;
+  background: rgba(10,10,18,0.95); border: 1px solid rgba(100,150,255,0.2);
+  border-radius: 6px; padding: 6px 10px; font-size: 10px; display: none;
+  color: rgba(200,210,230,0.7); max-width: 160px;
+}
+.hint { color: rgba(200,210,230,0.25); font-size: 9px; margin-top: 8px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h2>Wave Function Collapse</h2>
+  <div class="row"><label>Tileset</label><select id="tileset" onchange="restart()">
+    <option value="terrain">Terrain</option>
+    <option value="dungeon">Dungeon</option>
+    <option value="circuit">Circuit</option>
+    <option value="pipes">Pipes</option>
+    <option value="islands">Islands</option>
+    <option value="city">City</option>
+  </select></div>
+  <div class="row"><label>Grid</label><select id="gridSize" onchange="restart()">
+    <option value="16">16×16</option>
+    <option value="24" selected>24×24</option>
+    <option value="36">36×36</option>
+    <option value="48">48×48</option>
+  </select></div>
+  <div class="row"><label>Speed</label><select id="speed">
+    <option value="1">Slow</option>
+    <option value="4" selected>Medium</option>
+    <option value="16">Fast</option>
+    <option value="999">Instant</option>
+  </select></div>
+  <div class="btns">
+    <button class="btn" onclick="restart()">Restart</button>
+    <button class="btn" id="pauseBtn" onclick="togglePause()">Pause</button>
+    <button class="btn" id="superBtn" onclick="toggleSuper()">Ghost</button>
+    <button class="btn" id="autoBtn" onclick="toggleAuto()">Auto</button>
+    <a href="/" class="btn" style="text-decoration:none">← Hub</a>
+  </div>
+  <div id="status">Initializing...</div>
+  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+  <div class="hint">Click cell to seed · Space pause · R restart · G ghost · A auto-cycle</div>
+</div>
+<div id="tooltip"></div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const tooltip = document.getElementById('tooltip');
+
+// ===== TILE RENDERING =====
+// Each tile has edges (T,R,B,L) for constraint matching and a draw function
+
+function makeTileRenderer() {
+  // Offscreen canvas for tile caching
+  const cache = new Map();
+
+  return function renderTile(tile, size) {
+    const key = `${tile.name}_${size}`;
+    if (cache.has(key)) return cache.get(key);
+
+    const off = document.createElement('canvas');
+    off.width = size; off.height = size;
+    const c = off.getContext('2d');
+
+    if (tile.draw) {
+      tile.draw(c, size);
+    } else {
+      c.fillStyle = tile.color;
+      c.fillRect(0, 0, size, size);
+    }
+    cache.set(key, off);
+    return off;
+  };
+}
+
+const renderTile = makeTileRenderer();
+
+// ===== TILESET DEFINITIONS =====
+
+function drawGrass(c, s) {
+  c.fillStyle = '#3a7530';
+  c.fillRect(0, 0, s, s);
+  // Texture dots
+  const rng = mulberry32(42);
+  c.fillStyle = 'rgba(50,100,40,0.6)';
+  for (let i = 0; i < s * 0.8; i++) {
+    c.fillRect(rng() * s, rng() * s, 1.5, 1.5);
+  }
+  c.fillStyle = 'rgba(80,140,60,0.4)';
+  for (let i = 0; i < s * 0.3; i++) {
+    c.fillRect(rng() * s, rng() * s, 1, 2);
+  }
+}
+
+function drawWater(c, s, depth) {
+  const base = depth === 'deep' ? '#0a2855' : '#1a4878';
+  c.fillStyle = base;
+  c.fillRect(0, 0, s, s);
+  // Wave lines
+  c.strokeStyle = depth === 'deep' ? 'rgba(30,80,140,0.4)' : 'rgba(60,130,200,0.3)';
+  c.lineWidth = 1;
+  for (let y = s * 0.2; y < s; y += s * 0.25) {
+    c.beginPath();
+    c.moveTo(0, y);
+    for (let x = 0; x < s; x += 4) {
+      c.lineTo(x, y + Math.sin(x * 0.3 + y) * 2);
+    }
+    c.stroke();
+  }
+}
+
+function drawSand(c, s) {
+  c.fillStyle = '#c4a855';
+  c.fillRect(0, 0, s, s);
+  const rng = mulberry32(99);
+  c.fillStyle = 'rgba(180,150,60,0.4)';
+  for (let i = 0; i < s * 0.6; i++) {
+    c.fillRect(rng() * s, rng() * s, 1, 1);
+  }
+}
+
+function drawForest(c, s) {
+  drawGrass(c, s);
+  const rng = mulberry32(77);
+  // Trees
+  const count = Math.max(2, Math.floor(s / 8));
+  for (let i = 0; i < count; i++) {
+    const tx = rng() * s * 0.8 + s * 0.1;
+    const ty = rng() * s * 0.7 + s * 0.15;
+    const ts = s * (0.15 + rng() * 0.15);
+    c.fillStyle = `hsl(${120 + rng()*30}, ${40+rng()*20}%, ${18+rng()*12}%)`;
+    c.beginPath();
+    c.arc(tx, ty, ts, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = 'rgba(0,0,0,0.15)';
+    c.beginPath();
+    c.arc(tx + ts*0.2, ty + ts*0.2, ts, 0, Math.PI * 2);
+    c.fill();
+  }
+}
+
+function drawMountain(c, s) {
+  c.fillStyle = '#505858';
+  c.fillRect(0, 0, s, s);
+  // Peak
+  c.fillStyle = '#687070';
+  c.beginPath();
+  c.moveTo(s*0.5, s*0.1);
+  c.lineTo(s*0.85, s*0.85);
+  c.lineTo(s*0.15, s*0.85);
+  c.fill();
+  // Snow cap
+  c.fillStyle = '#d8e0e8';
+  c.beginPath();
+  c.moveTo(s*0.5, s*0.1);
+  c.lineTo(s*0.62, s*0.35);
+  c.lineTo(s*0.38, s*0.35);
+  c.fill();
+}
+
+function drawSnow(c, s) {
+  c.fillStyle = '#d0d8e0';
+  c.fillRect(0, 0, s, s);
+  const rng = mulberry32(55);
+  c.fillStyle = 'rgba(220,230,240,0.5)';
+  for (let i = 0; i < s * 0.5; i++) {
+    c.fillRect(rng() * s, rng() * s, 2, 1);
+  }
+}
+
+function drawShore(c, s, waterSide) {
+  // waterSide: 'N','S','E','W' — which side is water
+  drawSand(c, s);
+  const grd = c.createLinearGradient(
+    waterSide === 'E' ? s : waterSide === 'W' ? 0 : 0,
+    waterSide === 'S' ? s : waterSide === 'N' ? 0 : 0,
+    waterSide === 'E' ? s*0.4 : waterSide === 'W' ? s*0.6 : s,
+    waterSide === 'S' ? s*0.4 : waterSide === 'N' ? s*0.6 : s
+  );
+  grd.addColorStop(0, 'rgba(26,72,120,0.9)');
+  grd.addColorStop(0.4, 'rgba(26,72,120,0.4)');
+  grd.addColorStop(1, 'rgba(26,72,120,0)');
+  c.fillStyle = grd;
+  c.fillRect(0, 0, s, s);
+  // Foam line
+  c.strokeStyle = 'rgba(200,220,240,0.3)';
+  c.lineWidth = 1.5;
+  c.beginPath();
+  if (waterSide === 'N') { c.moveTo(0, s*0.35); c.bezierCurveTo(s*0.3, s*0.3, s*0.7, s*0.4, s, s*0.35); }
+  if (waterSide === 'S') { c.moveTo(0, s*0.65); c.bezierCurveTo(s*0.3, s*0.7, s*0.7, s*0.6, s, s*0.65); }
+  if (waterSide === 'W') { c.moveTo(s*0.35, 0); c.bezierCurveTo(s*0.3, s*0.3, s*0.4, s*0.7, s*0.35, s); }
+  if (waterSide === 'E') { c.moveTo(s*0.65, 0); c.bezierCurveTo(s*0.7, s*0.3, s*0.6, s*0.7, s*0.65, s); }
+  c.stroke();
+}
+
+function drawTransition(c, s, fromColor, toColor, side) {
+  c.fillStyle = fromColor;
+  c.fillRect(0, 0, s, s);
+  const grd = c.createLinearGradient(
+    side === 'E' ? 0 : side === 'W' ? s : 0,
+    side === 'S' ? 0 : side === 'N' ? s : 0,
+    side === 'E' ? s : side === 'W' ? 0 : s,
+    side === 'S' ? s : side === 'N' ? 0 : s
+  );
+  grd.addColorStop(0, fromColor);
+  grd.addColorStop(1, toColor);
+  c.fillStyle = grd;
+  c.fillRect(0, 0, s, s);
+}
+
+// Seeded RNG
+function mulberry32(seed) {
+  let s = seed | 0;
+  return function() {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Pipe drawing helpers
+function drawPipeSegment(c, s, top, right, bottom, left, highlight) {
+  const bg = highlight || '#1a1a2a';
+  c.fillStyle = bg;
+  c.fillRect(0, 0, s, s);
+  const pw = s * 0.3; // pipe width
+  const cx = s / 2, cy = s / 2;
+  c.fillStyle = '#556580';
+  if (top)    c.fillRect(cx - pw/2, 0, pw, cy);
+  if (bottom) c.fillRect(cx - pw/2, cy, pw, cy);
+  if (left)   c.fillRect(0, cy - pw/2, cx, pw);
+  if (right)  c.fillRect(cx, cy - pw/2, cx, pw);
+  // Center joint
+  const has = top || right || bottom || left;
+  if (has) {
+    c.fillRect(cx - pw/2, cy - pw/2, pw, pw);
+    // Highlight
+    c.fillStyle = 'rgba(120,160,200,0.2)';
+    if (top)    c.fillRect(cx - pw/4, 0, pw/2, cy);
+    if (bottom) c.fillRect(cx - pw/4, cy, pw/2, cy);
+    if (left)   c.fillRect(0, cy - pw/4, cx, pw/2);
+    if (right)  c.fillRect(cx, cy - pw/4, cx, pw/2);
+  }
+}
+
+// Circuit drawing helpers
+function drawTrace(c, s, top, right, bottom, left, special) {
+  c.fillStyle = '#0a2818';
+  c.fillRect(0, 0, s, s);
+  // Board texture
+  const rng = mulberry32(31);
+  c.fillStyle = 'rgba(20,60,40,0.3)';
+  for (let i = 0; i < 5; i++) {
+    c.fillRect(rng()*s, rng()*s, rng()*s*0.3, 0.5);
+  }
+  const tw = s * 0.12;
+  const cx = s/2, cy = s/2;
+  c.fillStyle = '#30a060';
+  if (top)    c.fillRect(cx - tw/2, 0, tw, cy);
+  if (bottom) c.fillRect(cx - tw/2, cy, tw, cy);
+  if (left)   c.fillRect(0, cy - tw/2, cx, tw);
+  if (right)  c.fillRect(cx, cy - tw/2, cx, tw);
+  const has = top || right || bottom || left;
+  if (has) c.fillRect(cx - tw/2, cy - tw/2, tw, tw);
+  // Solder points at ends
+  c.fillStyle = '#80c090';
+  const r = tw * 0.6;
+  if (has) { c.beginPath(); c.arc(cx, cy, r, 0, Math.PI*2); c.fill(); }
+  // Special components
+  if (special === 'chip') {
+    c.fillStyle = '#1a1a1a';
+    c.fillRect(cx - s*0.25, cy - s*0.2, s*0.5, s*0.4);
+    c.fillStyle = '#c0a020';
+    c.fillRect(cx - s*0.22, cy - s*0.17, s*0.44, s*0.34);
+    c.fillStyle = '#fff';
+    c.font = `${s*0.15}px monospace`;
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText('IC', cx, cy);
+  } else if (special === 'led') {
+    c.fillStyle = '#ff3030';
+    c.beginPath(); c.arc(cx, cy, s*0.15, 0, Math.PI*2); c.fill();
+    c.fillStyle = 'rgba(255,60,60,0.15)';
+    c.beginPath(); c.arc(cx, cy, s*0.3, 0, Math.PI*2); c.fill();
+  } else if (special === 'cap') {
+    c.fillStyle = '#2060a0';
+    c.fillRect(cx - s*0.15, cy - s*0.08, s*0.3, s*0.16);
+  }
+}
+
+// Dungeon drawing
+function drawDungeonTile(c, s, type, edges) {
+  if (type === 'wall') {
+    c.fillStyle = '#222233';
+    c.fillRect(0, 0, s, s);
+    const rng = mulberry32(11);
+    // Stone texture
+    c.strokeStyle = 'rgba(60,60,80,0.4)';
+    c.lineWidth = 0.5;
+    for (let y = 0; y < s; y += s/3) {
+      for (let x = (y % 2 === 0 ? 0 : s/4); x < s; x += s/2) {
+        c.strokeRect(x + rng()*2, y + rng()*2, s/2 - 2, s/3 - 2);
+      }
+    }
+  } else if (type === 'floor') {
+    c.fillStyle = '#3a3a48';
+    c.fillRect(0, 0, s, s);
+    // Floor tile pattern
+    c.strokeStyle = 'rgba(70,70,90,0.3)';
+    c.lineWidth = 0.5;
+    c.strokeRect(2, 2, s-4, s-4);
+    c.strokeRect(s*0.2, s*0.2, s*0.6, s*0.6);
+  } else if (type === 'wall_edge') {
+    c.fillStyle = '#2d2d40';
+    c.fillRect(0, 0, s, s);
+    // Draw edge with gradient
+    const hasFloor = edges;
+    c.fillStyle = '#3a3a48';
+    if (hasFloor === 'N') c.fillRect(0, s*0.5, s, s*0.5);
+    if (hasFloor === 'S') c.fillRect(0, 0, s, s*0.5);
+    if (hasFloor === 'E') c.fillRect(0, 0, s*0.5, s);
+    if (hasFloor === 'W') c.fillRect(s*0.5, 0, s*0.5, s);
+    // Wall edge line
+    c.strokeStyle = 'rgba(80,80,110,0.5)';
+    c.lineWidth = 2;
+    c.beginPath();
+    if (hasFloor === 'N') { c.moveTo(0, s*0.5); c.lineTo(s, s*0.5); }
+    if (hasFloor === 'S') { c.moveTo(0, s*0.5); c.lineTo(s, s*0.5); }
+    if (hasFloor === 'E') { c.moveTo(s*0.5, 0); c.lineTo(s*0.5, s); }
+    if (hasFloor === 'W') { c.moveTo(s*0.5, 0); c.lineTo(s*0.5, s); }
+    c.stroke();
+  } else if (type === 'door') {
+    c.fillStyle = '#2d2d40';
+    c.fillRect(0, 0, s, s);
+    c.fillStyle = '#705020';
+    if (edges === 'H') {
+      c.fillRect(s*0.15, s*0.25, s*0.7, s*0.5);
+      c.fillStyle = '#906830';
+      c.fillRect(s*0.2, s*0.3, s*0.6, s*0.4);
+      c.fillStyle = '#c0a050';
+      c.beginPath(); c.arc(s*0.65, s*0.5, s*0.04, 0, Math.PI*2); c.fill();
+    } else {
+      c.fillRect(s*0.25, s*0.15, s*0.5, s*0.7);
+      c.fillStyle = '#906830';
+      c.fillRect(s*0.3, s*0.2, s*0.4, s*0.6);
+      c.fillStyle = '#c0a050';
+      c.beginPath(); c.arc(s*0.5, s*0.65, s*0.04, 0, Math.PI*2); c.fill();
+    }
+  } else if (type === 'torch') {
+    c.fillStyle = '#222233';
+    c.fillRect(0, 0, s, s);
+    // Glow
+    const grd = c.createRadialGradient(s*0.5, s*0.35, 0, s*0.5, s*0.35, s*0.6);
+    grd.addColorStop(0, 'rgba(255,160,40,0.25)');
+    grd.addColorStop(1, 'rgba(255,100,20,0)');
+    c.fillStyle = grd;
+    c.fillRect(0, 0, s, s);
+    // Bracket
+    c.fillStyle = '#606070';
+    c.fillRect(s*0.45, s*0.4, s*0.1, s*0.35);
+    // Flame
+    c.fillStyle = '#ff9020';
+    c.beginPath();
+    c.moveTo(s*0.5, s*0.2);
+    c.bezierCurveTo(s*0.35, s*0.35, s*0.38, s*0.45, s*0.5, s*0.42);
+    c.bezierCurveTo(s*0.62, s*0.45, s*0.65, s*0.35, s*0.5, s*0.2);
+    c.fill();
+  }
+}
+
+// City tiles
+function drawCityTile(c, s, type) {
+  if (type === 'road') {
+    c.fillStyle = '#404048';
+    c.fillRect(0, 0, s, s);
+    // Center line
+    c.setLineDash([s*0.1, s*0.08]);
+    c.strokeStyle = 'rgba(200,200,100,0.3)';
+    c.lineWidth = 1;
+    c.beginPath(); c.moveTo(s*0.5, 0); c.lineTo(s*0.5, s); c.stroke();
+    c.beginPath(); c.moveTo(0, s*0.5); c.lineTo(s, s*0.5); c.stroke();
+    c.setLineDash([]);
+  } else if (type === 'road_h') {
+    c.fillStyle = '#2a3a2a';
+    c.fillRect(0, 0, s, s);
+    c.fillStyle = '#404048';
+    c.fillRect(0, s*0.25, s, s*0.5);
+    c.setLineDash([s*0.1, s*0.08]);
+    c.strokeStyle = 'rgba(200,200,100,0.3)';
+    c.lineWidth = 1;
+    c.beginPath(); c.moveTo(0, s*0.5); c.lineTo(s, s*0.5); c.stroke();
+    c.setLineDash([]);
+  } else if (type === 'road_v') {
+    c.fillStyle = '#2a3a2a';
+    c.fillRect(0, 0, s, s);
+    c.fillStyle = '#404048';
+    c.fillRect(s*0.25, 0, s*0.5, s);
+    c.setLineDash([s*0.1, s*0.08]);
+    c.strokeStyle = 'rgba(200,200,100,0.3)';
+    c.lineWidth = 1;
+    c.beginPath(); c.moveTo(s*0.5, 0); c.lineTo(s*0.5, s); c.stroke();
+    c.setLineDash([]);
+  } else if (type === 'building') {
+    c.fillStyle = '#2a3a2a';
+    c.fillRect(0, 0, s, s);
+    const rng = mulberry32(type.charCodeAt(0) * 7 + s);
+    const bw = s * (0.5 + rng() * 0.3);
+    const bh = s * (0.5 + rng() * 0.3);
+    const bx = (s - bw) / 2;
+    const by = (s - bh) / 2;
+    const hue = rng() * 40 + 200;
+    c.fillStyle = `hsl(${hue}, 15%, ${20 + rng()*10}%)`;
+    c.fillRect(bx, by, bw, bh);
+    // Windows
+    c.fillStyle = `rgba(255,230,150,${0.3 + rng()*0.4})`;
+    const ws = s * 0.08;
+    for (let wy = by + s*0.1; wy < by + bh - s*0.1; wy += s * 0.15) {
+      for (let wx = bx + s*0.1; wx < bx + bw - s*0.1; wx += s * 0.13) {
+        if (rng() > 0.3) c.fillRect(wx, wy, ws, ws);
+      }
+    }
+  } else if (type === 'park') {
+    c.fillStyle = '#2a4a2a';
+    c.fillRect(0, 0, s, s);
+    const rng = mulberry32(88);
+    for (let i = 0; i < 3; i++) {
+      c.fillStyle = `rgba(40,${80+rng()*40},30,0.7)`;
+      c.beginPath();
+      c.arc(rng()*s*0.6+s*0.2, rng()*s*0.6+s*0.2, s*0.12+rng()*s*0.08, 0, Math.PI*2);
+      c.fill();
+    }
+  } else if (type === 'corner') {
+    c.fillStyle = '#2a3a2a';
+    c.fillRect(0, 0, s, s);
+  }
+}
+
+// Island tile helpers
+function drawIslandTile(c, s, type) {
+  if (type === 'ocean') {
+    drawWater(c, s, 'deep');
+  } else if (type === 'shallow') {
+    drawWater(c, s, 'shallow');
+  } else if (type === 'land') {
+    c.fillStyle = '#3a7530';
+    c.fillRect(0, 0, s, s);
+  } else if (type === 'palm') {
+    c.fillStyle = '#3a7530';
+    c.fillRect(0, 0, s, s);
+    // Palm tree
+    c.fillStyle = '#604020';
+    c.fillRect(s*0.47, s*0.4, s*0.06, s*0.4);
+    c.fillStyle = '#308020';
+    for (let a = 0; a < 5; a++) {
+      const angle = (a / 5) * Math.PI * 2;
+      c.beginPath();
+      c.ellipse(s*0.5 + Math.cos(angle)*s*0.15, s*0.35 + Math.sin(angle)*s*0.08, s*0.18, s*0.06, angle, 0, Math.PI*2);
+      c.fill();
+    }
+  } else if (type === 'volcano') {
+    c.fillStyle = '#3a7530';
+    c.fillRect(0, 0, s, s);
+    c.fillStyle = '#604030';
+    c.beginPath();
+    c.moveTo(s*0.5, s*0.15);
+    c.lineTo(s*0.8, s*0.8);
+    c.lineTo(s*0.2, s*0.8);
+    c.fill();
+    c.fillStyle = '#ff4020';
+    c.beginPath(); c.arc(s*0.5, s*0.2, s*0.06, 0, Math.PI*2); c.fill();
+    c.fillStyle = 'rgba(255,100,20,0.2)';
+    c.beginPath(); c.arc(s*0.5, s*0.2, s*0.12, 0, Math.PI*2); c.fill();
+  }
+}
+
+const TILESETS = {
+  terrain: {
+    tiles: [
+      { name: 'Deep Water', edges: ['w','w','w','w'], weight: 2, draw: (c,s) => drawWater(c,s,'deep') },
+      { name: 'Water', edges: ['w','w','w','w'], weight: 4, draw: (c,s) => drawWater(c,s,'shallow') },
+      { name: 'Shore N', edges: ['s','sw','w','sw'], weight: 1.5, draw: (c,s) => drawShore(c,s,'N') },
+      { name: 'Shore S', edges: ['w','sw','s','sw'], weight: 1.5, draw: (c,s) => drawShore(c,s,'S') },
+      { name: 'Shore E', edges: ['sw','s','sw','w'], weight: 1.5, draw: (c,s) => drawShore(c,s,'E') },
+      { name: 'Shore W', edges: ['sw','w','sw','s'], weight: 1.5, draw: (c,s) => drawShore(c,s,'W') },
+      { name: 'Sand', edges: ['s','s','s','s'], weight: 2.5, draw: (c,s) => drawSand(c,s) },
+      { name: 'Grass', edges: ['g','g','g','g'], weight: 8, draw: (c,s) => drawGrass(c,s) },
+      { name: 'Grass-Sand N', edges: ['s','gs','g','gs'], weight: 1.5, draw: (c,s) => drawTransition(c,s,'#c4a855','#3a7530','N') },
+      { name: 'Grass-Sand S', edges: ['g','gs','s','gs'], weight: 1.5, draw: (c,s) => drawTransition(c,s,'#3a7530','#c4a855','N') },
+      { name: 'Grass-Sand E', edges: ['gs','s','gs','g'], weight: 1.5, draw: (c,s) => drawTransition(c,s,'#3a7530','#c4a855','E') },
+      { name: 'Grass-Sand W', edges: ['gs','g','gs','s'], weight: 1.5, draw: (c,s) => drawTransition(c,s,'#c4a855','#3a7530','E') },
+      { name: 'Forest', edges: ['g','g','g','g'], weight: 4, draw: (c,s) => drawForest(c,s) },
+      { name: 'Hill', edges: ['g','gm','g','gm'], weight: 1.5, draw: (c,s) => {
+        drawGrass(c,s);
+        c.fillStyle = 'rgba(80,90,70,0.4)';
+        c.beginPath(); c.moveTo(s*0.5,s*0.25); c.lineTo(s*0.8,s*0.7); c.lineTo(s*0.2,s*0.7); c.fill();
+      }},
+      { name: 'Mountain', edges: ['m','m','m','m'], weight: 1, draw: (c,s) => drawMountain(c,s) },
+      { name: 'Snow Peak', edges: ['m','m','m','m'], weight: 0.4, draw: (c,s) => drawSnow(c,s) },
+      { name: 'Hill-Mtn N', edges: ['m','gm','g','gm'], weight: 1, draw: (c,s) => drawTransition(c,s,'#505858','#3a7530','N') },
+      { name: 'Hill-Mtn S', edges: ['g','gm','m','gm'], weight: 1, draw: (c,s) => drawTransition(c,s,'#3a7530','#505858','N') },
+    ],
+    bg: '#060610'
+  },
+  dungeon: {
+    tiles: [
+      { name: 'Wall', edges: ['w','w','w','w'], weight: 5, draw: (c,s) => drawDungeonTile(c,s,'wall') },
+      { name: 'Floor', edges: ['f','f','f','f'], weight: 8, draw: (c,s) => drawDungeonTile(c,s,'floor') },
+      { name: 'Wall N', edges: ['w','wf','f','wf'], weight: 2, draw: (c,s) => drawDungeonTile(c,s,'wall_edge','S') },
+      { name: 'Wall S', edges: ['f','wf','w','wf'], weight: 2, draw: (c,s) => drawDungeonTile(c,s,'wall_edge','N') },
+      { name: 'Wall E', edges: ['wf','w','wf','f'], weight: 2, draw: (c,s) => drawDungeonTile(c,s,'wall_edge','W') },
+      { name: 'Wall W', edges: ['wf','f','wf','w'], weight: 2, draw: (c,s) => drawDungeonTile(c,s,'wall_edge','E') },
+      { name: 'Door H', edges: ['w','f','w','f'], weight: 0.4, draw: (c,s) => drawDungeonTile(c,s,'door','H') },
+      { name: 'Door V', edges: ['f','w','f','w'], weight: 0.4, draw: (c,s) => drawDungeonTile(c,s,'door','V') },
+      { name: 'Torch', edges: ['w','wf','w','wf'], weight: 0.2, draw: (c,s) => drawDungeonTile(c,s,'torch') },
+      { name: 'Pillar', edges: ['f','f','f','f'], weight: 0.5, draw: (c,s) => {
+        drawDungeonTile(c,s,'floor');
+        c.fillStyle = '#5a5a6a';
+        c.beginPath(); c.arc(s*0.5, s*0.5, s*0.15, 0, Math.PI*2); c.fill();
+        c.fillStyle = '#6a6a7a';
+        c.beginPath(); c.arc(s*0.48, s*0.48, s*0.12, 0, Math.PI*2); c.fill();
+      }},
+    ],
+    bg: '#050508'
+  },
+  circuit: {
+    tiles: [
+      { name: 'Board', edges: ['b','b','b','b'], weight: 5, draw: (c,s) => drawTrace(c,s,0,0,0,0) },
+      { name: 'Trace H', edges: ['b','t','b','t'], weight: 3, draw: (c,s) => drawTrace(c,s,0,1,0,1) },
+      { name: 'Trace V', edges: ['t','b','t','b'], weight: 3, draw: (c,s) => drawTrace(c,s,1,0,1,0) },
+      { name: 'Cross', edges: ['t','t','t','t'], weight: 1, draw: (c,s) => drawTrace(c,s,1,1,1,1) },
+      { name: 'T-up', edges: ['t','t','b','t'], weight: 1.2, draw: (c,s) => drawTrace(c,s,1,1,0,1) },
+      { name: 'T-down', edges: ['b','t','t','t'], weight: 1.2, draw: (c,s) => drawTrace(c,s,0,1,1,1) },
+      { name: 'T-left', edges: ['t','b','t','t'], weight: 1.2, draw: (c,s) => drawTrace(c,s,1,0,1,1) },
+      { name: 'T-right', edges: ['t','t','t','b'], weight: 1.2, draw: (c,s) => drawTrace(c,s,1,1,1,0) },
+      { name: 'Corner TL', edges: ['b','t','t','b'], weight: 2, draw: (c,s) => drawTrace(c,s,0,1,1,0) },
+      { name: 'Corner TR', edges: ['b','b','t','t'], weight: 2, draw: (c,s) => drawTrace(c,s,0,0,1,1) },
+      { name: 'Corner BL', edges: ['t','t','b','b'], weight: 2, draw: (c,s) => drawTrace(c,s,1,1,0,0) },
+      { name: 'Corner BR', edges: ['t','b','b','t'], weight: 2, draw: (c,s) => drawTrace(c,s,1,0,0,1) },
+      { name: 'Chip', edges: ['t','t','t','t'], weight: 0.2, draw: (c,s) => drawTrace(c,s,1,1,1,1,'chip') },
+      { name: 'LED', edges: ['b','b','t','b'], weight: 0.15, draw: (c,s) => drawTrace(c,s,0,0,1,0,'led') },
+      { name: 'Capacitor', edges: ['t','b','t','b'], weight: 0.4, draw: (c,s) => drawTrace(c,s,1,0,1,0,'cap') },
+    ],
+    bg: '#030a06'
+  },
+  pipes: {
+    tiles: [
+      { name: 'Empty', edges: ['e','e','e','e'], weight: 4, draw: (c,s) => drawPipeSegment(c,s,0,0,0,0) },
+      { name: 'Pipe H', edges: ['e','p','e','p'], weight: 3, draw: (c,s) => drawPipeSegment(c,s,0,1,0,1) },
+      { name: 'Pipe V', edges: ['p','e','p','e'], weight: 3, draw: (c,s) => drawPipeSegment(c,s,1,0,1,0) },
+      { name: 'Elbow NE', edges: ['p','p','e','e'], weight: 2, draw: (c,s) => drawPipeSegment(c,s,1,1,0,0) },
+      { name: 'Elbow NW', edges: ['p','e','e','p'], weight: 2, draw: (c,s) => drawPipeSegment(c,s,1,0,0,1) },
+      { name: 'Elbow SE', edges: ['e','p','p','e'], weight: 2, draw: (c,s) => drawPipeSegment(c,s,0,1,1,0) },
+      { name: 'Elbow SW', edges: ['e','e','p','p'], weight: 2, draw: (c,s) => drawPipeSegment(c,s,0,0,1,1) },
+      { name: 'T-up', edges: ['p','p','e','p'], weight: 1, draw: (c,s) => drawPipeSegment(c,s,1,1,0,1) },
+      { name: 'T-down', edges: ['e','p','p','p'], weight: 1, draw: (c,s) => drawPipeSegment(c,s,0,1,1,1) },
+      { name: 'T-left', edges: ['p','e','p','p'], weight: 1, draw: (c,s) => drawPipeSegment(c,s,1,0,1,1) },
+      { name: 'T-right', edges: ['p','p','p','e'], weight: 1, draw: (c,s) => drawPipeSegment(c,s,1,1,1,0) },
+      { name: 'Cross', edges: ['p','p','p','p'], weight: 0.4, draw: (c,s) => drawPipeSegment(c,s,1,1,1,1) },
+      { name: 'Valve', edges: ['p','e','p','e'], weight: 0.2, draw: (c,s) => {
+        drawPipeSegment(c,s,1,0,1,0);
+        c.fillStyle = '#a06040';
+        c.beginPath(); c.arc(s*0.5, s*0.5, s*0.12, 0, Math.PI*2); c.fill();
+        c.fillStyle = '#c07050';
+        c.fillRect(s*0.42, s*0.3, s*0.16, s*0.08);
+      }},
+    ],
+    bg: '#0a0a14'
+  },
+  islands: {
+    tiles: [
+      { name: 'Ocean', edges: ['o','o','o','o'], weight: 8, draw: (c,s) => drawIslandTile(c,s,'ocean') },
+      { name: 'Shallow', edges: ['o','o','o','o'], weight: 3, draw: (c,s) => drawIslandTile(c,s,'shallow') },
+      { name: 'Beach N', edges: ['l','ol','o','ol'], weight: 2, draw: (c,s) => drawShore(c,s,'S') },
+      { name: 'Beach S', edges: ['o','ol','l','ol'], weight: 2, draw: (c,s) => drawShore(c,s,'N') },
+      { name: 'Beach E', edges: ['ol','l','ol','o'], weight: 2, draw: (c,s) => drawShore(c,s,'W') },
+      { name: 'Beach W', edges: ['ol','o','ol','l'], weight: 2, draw: (c,s) => drawShore(c,s,'E') },
+      { name: 'Land', edges: ['l','l','l','l'], weight: 3, draw: (c,s) => drawIslandTile(c,s,'land') },
+      { name: 'Palm', edges: ['l','l','l','l'], weight: 0.8, draw: (c,s) => drawIslandTile(c,s,'palm') },
+      { name: 'Volcano', edges: ['l','l','l','l'], weight: 0.15, draw: (c,s) => drawIslandTile(c,s,'volcano') },
+    ],
+    bg: '#040a18'
+  },
+  city: {
+    tiles: [
+      { name: 'Empty', edges: ['e','e','e','e'], weight: 3, draw: (c,s) => drawCityTile(c,s,'corner') },
+      { name: 'Road H', edges: ['e','r','e','r'], weight: 3, draw: (c,s) => drawCityTile(c,s,'road_h') },
+      { name: 'Road V', edges: ['r','e','r','e'], weight: 3, draw: (c,s) => drawCityTile(c,s,'road_v') },
+      { name: 'Crossroad', edges: ['r','r','r','r'], weight: 0.8, draw: (c,s) => drawCityTile(c,s,'road') },
+      { name: 'T-up', edges: ['r','r','e','r'], weight: 1, draw: (c,s) => {
+        drawCityTile(c,s,'corner');
+        c.fillStyle='#404048'; c.fillRect(0,0,s,s*0.5); c.fillRect(0,s*0.25,s,s*0.25);
+      }},
+      { name: 'T-down', edges: ['e','r','r','r'], weight: 1, draw: (c,s) => {
+        drawCityTile(c,s,'corner');
+        c.fillStyle='#404048'; c.fillRect(0,s*0.5,s,s*0.5); c.fillRect(0,s*0.25,s,s*0.25);
+      }},
+      { name: 'Corner NE', edges: ['r','r','e','e'], weight: 1.5, draw: (c,s) => {
+        drawCityTile(c,s,'corner');
+        c.fillStyle='#404048'; c.fillRect(s*0.25,0,s*0.5,s*0.5); c.fillRect(s*0.5,s*0.25,s*0.5,s*0.5);
+      }},
+      { name: 'Corner NW', edges: ['r','e','e','r'], weight: 1.5, draw: (c,s) => {
+        drawCityTile(c,s,'corner');
+        c.fillStyle='#404048'; c.fillRect(s*0.25,0,s*0.5,s*0.5); c.fillRect(0,s*0.25,s*0.5,s*0.5);
+      }},
+      { name: 'Corner SE', edges: ['e','r','r','e'], weight: 1.5, draw: (c,s) => {
+        drawCityTile(c,s,'corner');
+        c.fillStyle='#404048'; c.fillRect(s*0.5,s*0.25,s*0.5,s*0.5); c.fillRect(s*0.25,s*0.5,s*0.5,s*0.5);
+      }},
+      { name: 'Corner SW', edges: ['e','e','r','r'], weight: 1.5, draw: (c,s) => {
+        drawCityTile(c,s,'corner');
+        c.fillStyle='#404048'; c.fillRect(0,s*0.25,s*0.5,s*0.5); c.fillRect(s*0.25,s*0.5,s*0.5,s*0.5);
+      }},
+      { name: 'Building', edges: ['e','e','e','e'], weight: 4, draw: (c,s) => drawCityTile(c,s,'building') },
+      { name: 'Park', edges: ['e','e','e','e'], weight: 1.5, draw: (c,s) => drawCityTile(c,s,'park') },
+    ],
+    bg: '#080810'
+  }
+};
+
+// ===== STATE =====
+let grid, W, H, cellSize, collapsed, totalCells, paused = false, done = false;
+let contradictions = 0, backtracks = 0;
+let showSuperposition = true;
+let collapseRipples = []; // {x, y, t, maxT}
+let history = []; // for backtracking: [{idx, previousState}]
+const MAX_BACKTRACK = 50;
+let autoMode = false;
+let fadeAlpha = 0; // 0 = no fade, 1 = fully faded out
+let fadeDir = 0; // 0 = none, 1 = fading out, -1 = fading in
+let completedAt = 0; // timestamp when generation completed
+const AUTO_HOLD_TIME = 4000; // ms to hold completed map before fading
+const FADE_SPEED = 0.02;
+const tilesetNames = ['terrain','dungeon','circuit','pipes','islands','city'];
+let autoTilesetIdx = 0;
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', () => { resize(); if (grid) render(); });
+resize();
+
+function getTileset() { return TILESETS[document.getElementById('tileset').value]; }
+function getGridSize() { return parseInt(document.getElementById('gridSize').value); }
+function getSpeed() { return parseInt(document.getElementById('speed').value); }
+
+function canBeAdjacent(tileA, tileB, direction) {
+  const opposite = [2, 3, 0, 1];
+  return tileA.edges[direction] === tileB.edges[opposite[direction]];
+}
+
+function restart() {
+  const ts = getTileset();
+  const size = getGridSize();
+  W = size; H = size;
+  const tiles = ts.tiles;
+
+  const maxDim = Math.min(canvas.width - 250, canvas.height - 40);
+  cellSize = Math.floor(maxDim / size);
+
+  grid = new Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    grid[i] = { possible: tiles.map((_, idx) => idx), collapsed: false, tile: -1 };
+  }
+  collapsed = 0;
+  totalCells = W * H;
+  contradictions = 0;
+  backtracks = 0;
+  done = false;
+  paused = false;
+  collapseRipples = [];
+  history = [];
+  document.getElementById('pauseBtn').textContent = 'Pause';
+  document.getElementById('pauseBtn').classList.remove('active');
+  updateStatus();
+  render();
+}
+
+function entropy(cell) {
+  if (cell.collapsed) return Infinity;
+  const ts = getTileset().tiles;
+  if (cell.possible.length === 0) return -1;
+  if (cell.possible.length === 1) return 0;
+  let sumW = 0, sumWLogW = 0;
+  for (const idx of cell.possible) {
+    const w = ts[idx].weight;
+    sumW += w;
+    sumWLogW += w * Math.log(w);
+  }
+  return Math.log(sumW) - sumWLogW / sumW + Math.random() * 0.001;
+}
+
+function findLowestEntropy() {
+  let minE = Infinity, best = -1;
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i].collapsed) continue;
+    const e = entropy(grid[i]);
+    if (e < 0) return -2;
+    if (e < minE) { minE = e; best = i; }
+  }
+  return best;
+}
+
+function cloneGrid() {
+  return grid.map(cell => ({
+    possible: [...cell.possible],
+    collapsed: cell.collapsed,
+    tile: cell.tile
+  }));
+}
+
+function collapseCell(idx) {
+  const cell = grid[idx];
+  const ts = getTileset().tiles;
+  let totalWeight = 0;
+  for (const t of cell.possible) totalWeight += ts[t].weight;
+  let r = Math.random() * totalWeight;
+  for (const t of cell.possible) {
+    r -= ts[t].weight;
+    if (r <= 0) {
+      cell.tile = t;
+      cell.possible = [t];
+      cell.collapsed = true;
+      collapsed++;
+      // Ripple effect
+      const x = idx % W, y = Math.floor(idx / W);
+      collapseRipples.push({ x, y, t: 0, maxT: 20 });
+      return true;
+    }
+  }
+  cell.tile = cell.possible[0];
+  cell.possible = [cell.possible[0]];
+  cell.collapsed = true;
+  collapsed++;
+  return true;
+}
+
+function propagate(startIdx) {
+  const ts = getTileset().tiles;
+  const stack = [startIdx];
+  const dirs = [[0,-1,0],[1,0,1],[0,1,2],[-1,0,3]];
+
+  while (stack.length > 0) {
+    const idx = stack.pop();
+    const x = idx % W, y = Math.floor(idx / W);
+    const cell = grid[idx];
+
+    for (const [dx, dy, dir] of dirs) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+      const nIdx = ny * W + nx;
+      const neighbour = grid[nIdx];
+      if (neighbour.collapsed) continue;
+
+      const before = neighbour.possible.length;
+      neighbour.possible = neighbour.possible.filter(nTile =>
+        cell.possible.some(cTile => canBeAdjacent(ts[cTile], ts[nTile], dir))
+      );
+
+      if (neighbour.possible.length === 0) return false;
+      if (neighbour.possible.length < before) {
+        if (neighbour.possible.length === 1 && !neighbour.collapsed) {
+          neighbour.tile = neighbour.possible[0];
+          neighbour.collapsed = true;
+          collapsed++;
+          const nx2 = nIdx % W, ny2 = Math.floor(nIdx / W);
+          collapseRipples.push({ x: nx2, y: ny2, t: 0, maxT: 15 });
+        }
+        stack.push(nIdx);
+      }
+    }
+  }
+  return true;
+}
+
+function step() {
+  if (done || collapsed >= totalCells) { done = true; return false; }
+
+  const idx = findLowestEntropy();
+  if (idx === -1) { done = true; return false; }
+  if (idx === -2) {
+    // Contradiction — try backtracking
+    if (history.length > 0 && backtracks < MAX_BACKTRACK) {
+      backtrack();
+      return true;
+    }
+    contradictions++;
+    done = true;
+    return false;
+  }
+
+  // Save state for backtracking
+  history.push({
+    gridState: cloneGrid(),
+    collapsed: collapsed
+  });
+  // Keep history bounded
+  if (history.length > MAX_BACKTRACK) history.shift();
+
+  collapseCell(idx);
+  const ok = propagate(idx);
+  if (!ok) {
+    if (history.length > 0 && backtracks < MAX_BACKTRACK) {
+      backtrack();
+      return true;
+    }
+    contradictions++;
+    done = true;
+    return false;
+  }
+  return true;
+}
+
+function backtrack() {
+  const state = history.pop();
+  grid = state.gridState;
+  collapsed = state.collapsed;
+  backtracks++;
+}
+
+// ===== RENDERING =====
+
+function render() {
+  const ts = getTileset();
+  ctx.fillStyle = ts.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const offsetX = Math.floor((canvas.width - 230 - W * cellSize) / 2);
+  const offsetY = Math.floor((canvas.height - H * cellSize) / 2);
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const cell = grid[y * W + x];
+      const px = offsetX + x * cellSize;
+      const py = offsetY + y * cellSize;
+
+      if (cell.collapsed) {
+        // Draw the tile graphic
+        const tileCanvas = renderTile(ts.tiles[cell.tile], cellSize);
+        ctx.drawImage(tileCanvas, px, py);
+      } else if (showSuperposition && cellSize >= 8) {
+        // SUPERPOSITION: draw all possible tiles overlaid with transparency
+        const alpha = Math.min(0.7, 1 / Math.sqrt(cell.possible.length));
+        ctx.globalAlpha = alpha;
+        for (const tIdx of cell.possible) {
+          const tileCanvas = renderTile(ts.tiles[tIdx], cellSize);
+          ctx.drawImage(tileCanvas, px, py);
+        }
+        ctx.globalAlpha = 1;
+
+        // Shimmer overlay showing entropy
+        const e = cell.possible.length / ts.tiles.length;
+        ctx.fillStyle = `rgba(96,128,255,${0.02 + e * 0.05})`;
+        ctx.fillRect(px, py, cellSize, cellSize);
+
+        // Count in corner
+        if (cellSize >= 16) {
+          ctx.fillStyle = `rgba(150,180,255,${0.3 + (1-e)*0.3})`;
+          ctx.font = `${Math.max(7, Math.min(cellSize * 0.3, 11))}px monospace`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(cell.possible.length, px + 2, py + 1);
+        }
+      } else {
+        // Simple entropy visualization
+        const e = cell.possible.length / ts.tiles.length;
+        const b = Math.floor(12 + e * 20);
+        ctx.fillStyle = `rgb(${b}, ${b}, ${b + 8})`;
+        ctx.fillRect(px, py, cellSize, cellSize);
+        if (cellSize > 14) {
+          ctx.fillStyle = `rgba(100,150,255,${0.2 + (1-e)*0.3})`;
+          ctx.font = `${Math.min(cellSize - 4, 10)}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(cell.possible.length, px + cellSize/2, py + cellSize/2);
+        }
+      }
+    }
+  }
+
+  // Grid lines
+  if (cellSize > 6) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x <= W; x++) {
+      ctx.beginPath();
+      ctx.moveTo(offsetX + x * cellSize + 0.5, offsetY);
+      ctx.lineTo(offsetX + x * cellSize + 0.5, offsetY + H * cellSize);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= H; y++) {
+      ctx.beginPath();
+      ctx.moveTo(offsetX, offsetY + y * cellSize + 0.5);
+      ctx.lineTo(offsetX + W * cellSize, offsetY + y * cellSize + 0.5);
+      ctx.stroke();
+    }
+  }
+
+  // Collapse ripple effects
+  for (let i = collapseRipples.length - 1; i >= 0; i--) {
+    const rip = collapseRipples[i];
+    const progress = rip.t / rip.maxT;
+    const px = offsetX + rip.x * cellSize + cellSize / 2;
+    const py = offsetY + rip.y * cellSize + cellSize / 2;
+    const radius = cellSize * (0.5 + progress * 1.5);
+    const alpha = 0.3 * (1 - progress);
+
+    ctx.strokeStyle = `rgba(120,160,255,${alpha})`;
+    ctx.lineWidth = 1.5 * (1 - progress);
+    ctx.beginPath();
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    rip.t++;
+    if (rip.t >= rip.maxT) collapseRipples.splice(i, 1);
+  }
+}
+
+function updateStatus() {
+  const pct = totalCells ? Math.round(collapsed / totalCells * 100) : 0;
+  let text = `${collapsed}/${totalCells} (${pct}%)`;
+  if (backtracks > 0) text += ` · ${backtracks} backtrack${backtracks > 1 ? 's' : ''}`;
+  if (contradictions > 0) text += ` · stuck`;
+  if (done && collapsed >= totalCells) text += ' · complete';
+  if (paused) text += ' · paused';
+  document.getElementById('status').textContent = text;
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+function togglePause() {
+  paused = !paused;
+  document.getElementById('pauseBtn').textContent = paused ? 'Resume' : 'Pause';
+  document.getElementById('pauseBtn').classList.toggle('active', paused);
+  updateStatus();
+}
+
+function toggleSuper() {
+  showSuperposition = !showSuperposition;
+  document.getElementById('superBtn').classList.toggle('active', showSuperposition);
+  if (grid) render();
+}
+document.getElementById('superBtn').classList.toggle('active', showSuperposition);
+
+function toggleAuto() {
+  autoMode = !autoMode;
+  document.getElementById('autoBtn').classList.toggle('active', autoMode);
+  if (autoMode && done) {
+    completedAt = performance.now();
+  }
+}
+
+function autoCycleNext() {
+  autoTilesetIdx = (autoTilesetIdx + 1) % tilesetNames.length;
+  document.getElementById('tileset').value = tilesetNames[autoTilesetIdx];
+  restart();
+}
+
+// ===== CLICK TO SEED =====
+canvas.addEventListener('click', e => {
+  if (!grid) return;
+  const ts = getTileset();
+  const offsetX = Math.floor((canvas.width - 230 - W * cellSize) / 2);
+  const offsetY = Math.floor((canvas.height - H * cellSize) / 2);
+  const gx = Math.floor((e.clientX - offsetX) / cellSize);
+  const gy = Math.floor((e.clientY - offsetY) / cellSize);
+  if (gx < 0 || gx >= W || gy < 0 || gy >= H) return;
+
+  const idx = gy * W + gx;
+  const cell = grid[idx];
+  if (cell.collapsed) return;
+  if (cell.possible.length === 0) return;
+
+  // Save state
+  history.push({ gridState: cloneGrid(), collapsed });
+
+  collapseCell(idx);
+  const ok = propagate(idx);
+  if (!ok && history.length > 0) {
+    backtrack();
+  }
+  render();
+  updateStatus();
+});
+
+// Hover tooltip
+canvas.addEventListener('mousemove', e => {
+  if (!grid) return;
+  const ts = getTileset();
+  const offsetX = Math.floor((canvas.width - 230 - W * cellSize) / 2);
+  const offsetY = Math.floor((canvas.height - H * cellSize) / 2);
+  const gx = Math.floor((e.clientX - offsetX) / cellSize);
+  const gy = Math.floor((e.clientY - offsetY) / cellSize);
+
+  if (gx < 0 || gx >= W || gy < 0 || gy >= H) {
+    tooltip.style.display = 'none';
+    return;
+  }
+
+  const cell = grid[gy * W + gx];
+  if (cell.collapsed) {
+    tooltip.textContent = ts.tiles[cell.tile].name;
+  } else {
+    const names = cell.possible.slice(0, 5).map(i => ts.tiles[i].name).join(', ');
+    const extra = cell.possible.length > 5 ? ` +${cell.possible.length - 5}` : '';
+    tooltip.textContent = `${cell.possible.length} possible: ${names}${extra}`;
+  }
+  tooltip.style.display = 'block';
+  tooltip.style.left = (e.clientX + 14) + 'px';
+  tooltip.style.top = (e.clientY + 14) + 'px';
+});
+
+canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+// ===== KEYBOARD =====
+document.addEventListener('keydown', e => {
+  if (e.key === ' ') { e.preventDefault(); togglePause(); }
+  if (e.key === 'r' || e.key === 'R') restart();
+  if (e.key === 'g' || e.key === 'G') toggleSuper();
+  if (e.key === 'a' || e.key === 'A') toggleAuto();
+});
+
+// ===== VISIBILITY API =====
+let animating = true;
+document.addEventListener('visibilitychange', () => {
+  animating = !document.hidden;
+});
+
+// ===== ANIMATION LOOP =====
+function frame() {
+  if (animating) {
+    if (!done && !paused && grid) {
+      if (fadeDir === -1) {
+        // Fading in new generation
+        fadeAlpha -= FADE_SPEED;
+        if (fadeAlpha <= 0) { fadeAlpha = 0; fadeDir = 0; }
+      }
+      const speed = getSpeed();
+      for (let i = 0; i < speed; i++) {
+        if (!step()) break;
+      }
+      render();
+      updateStatus();
+    } else if (done && autoMode && !paused) {
+      // Auto-cycle: hold, then fade out, then restart with next tileset
+      if (completedAt === 0) completedAt = performance.now();
+      const elapsed = performance.now() - completedAt;
+
+      if (fadeDir === 0 && elapsed > AUTO_HOLD_TIME) {
+        fadeDir = 1; // start fading out
+      }
+      if (fadeDir === 1) {
+        fadeAlpha += FADE_SPEED;
+        if (fadeAlpha >= 1) {
+          fadeAlpha = 1;
+          fadeDir = -1;
+          completedAt = 0;
+          autoCycleNext();
+        }
+      }
+      render();
+    } else if (collapseRipples.length > 0) {
+      render();
+    }
+
+    // Draw fade overlay
+    if (fadeAlpha > 0) {
+      const ts = getTileset();
+      ctx.fillStyle = ts.bg;
+      ctx.globalAlpha = fadeAlpha;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1;
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+restart();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

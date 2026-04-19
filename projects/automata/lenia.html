@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lenia — Continuous Life</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a12;color:#c0d0e8;font-family:system-ui;overflow:hidden;display:flex;flex-direction:column;height:100vh}
+canvas{flex:1;cursor:crosshair;display:block}
+#ui{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:8px 16px;background:rgba(10,10,18,0.88);backdrop-filter:blur(8px);z-index:10;flex-wrap:wrap;border-bottom:1px solid #1a2a3a}
+#ui .title{font-size:1.1em;font-weight:300;color:#8ac0ff;letter-spacing:2px;margin-right:6px}
+#ui .sub{font-size:0.65em;color:#3a5a70;margin-right:8px}
+#ui button{background:rgba(20,28,40,0.9);border:1px solid #1a2a40;color:#8aa0c0;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:0.75em;white-space:nowrap}
+#ui button:hover{border-color:#3a5a80;color:#aac}
+#ui button.active{border-color:#4a80c0;color:#8ac0ff;background:rgba(40,60,100,0.4)}
+#ui select{background:#141a24;border:1px solid #1a2a40;color:#8aa0c0;padding:4px 8px;border-radius:4px;font-size:0.75em}
+#ui label{font-size:0.7em;color:#5a7090}
+#ui .sep{width:1px;height:20px;background:#1a2a40}
+#ui .group{display:flex;align-items:center;gap:6px}
+#info{position:fixed;bottom:8px;left:16px;font-size:0.7em;color:#3a5a70;z-index:10}
+#bar2{position:fixed;bottom:8px;right:16px;display:flex;gap:4px;z-index:10}
+#bar2 button{background:rgba(20,28,40,0.9);border:1px solid #1a2a40;color:#5a7090;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:0.65em}
+#bar2 button.active{border-color:#4a80c0;color:#8ac0ff}
+#params{position:fixed;top:48px;right:16px;background:rgba(10,10,18,0.92);border:1px solid #1a2a3a;border-radius:6px;padding:12px 16px;display:none;z-index:20;min-width:240px;backdrop-filter:blur(8px)}
+#params.show{display:block}
+#params label{display:flex;justify-content:space-between;font-size:0.7em;color:#5a7090;margin-bottom:2px}
+#params input[type=range]{width:100%;margin-bottom:8px;accent-color:#4a80c0}
+#params .val{color:#8ac0ff;font-family:monospace}
+#params .desc{font-size:0.65em;color:#2a4a60;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <span class="title">LENIA</span>
+  <span class="sub">continuous life</span>
+  <div class="sep"></div>
+  <div class="group">
+    <label>Species:</label>
+    <select id="species" onchange="loadSpecies(this.value)"></select>
+  </div>
+  <div class="sep"></div>
+  <button onclick="togglePause()" id="btnPause">Pause</button>
+  <button onclick="stepOnce()">Step</button>
+  <button onclick="clearGrid()">Clear</button>
+  <button onclick="randomSeed()">Seed</button>
+  <button onclick="toggleParams()" id="btnParams">Params</button>
+  <div class="sep"></div>
+  <div class="group">
+    <label>Brush:</label>
+    <button onclick="setBrush('dot')" id="b-dot" class="active">Dot</button>
+    <button onclick="setBrush('ring')" id="b-ring">Ring</button>
+    <button onclick="setBrush('noise')" id="b-noise">Noise</button>
+    <button onclick="setBrush('erase')" id="b-erase">Erase</button>
+  </div>
+  <div class="group">
+    <label>Size:</label>
+    <input type="range" min="3" max="50" value="15" id="brushSize" style="width:60px;accent-color:#4a80c0">
+  </div>
+</div>
+
+<div id="params">
+  <div class="desc" id="speciesDesc">Gliding organism</div>
+  <label>R (kernel radius) <span class="val" id="vR">13</span></label>
+  <input type="range" min="5" max="30" step="1" value="13" id="pR" oninput="paramChanged()">
+  <label>&mu; (growth center) <span class="val" id="vMu">0.15</span></label>
+  <input type="range" min="0.02" max="0.60" step="0.005" value="0.15" id="pMu" oninput="paramChanged()">
+  <label>&sigma; (growth width) <span class="val" id="vSigma">0.017</span></label>
+  <input type="range" min="0.003" max="0.08" step="0.001" value="0.017" id="pSigma" oninput="paramChanged()">
+  <label>dt (time step) <span class="val" id="vDt">0.10</span></label>
+  <input type="range" min="0.02" max="0.25" step="0.005" value="0.10" id="pDt" oninput="paramChanged()">
+  <label>Speed <span class="val" id="vSpeed">1</span></label>
+  <input type="range" min="1" max="5" step="1" value="1" id="pSpeed" oninput="speedChanged()">
+</div>
+
+<canvas id="c"></canvas>
+<div id="info">Click to paint life. Scroll to resize brush. Space to pause.</div>
+<div id="bar2">
+  <button class="active" onclick="setPalette(0,this)">Plasma</button>
+  <button onclick="setPalette(1,this)">Ocean</button>
+  <button onclick="setPalette(2,this)">Fire</button>
+  <button onclick="setPalette(3,this)">Ember</button>
+  <button onclick="setPalette(4,this)">Neon</button>
+  <button onclick="setPalette(5,this)">Mono</button>
+</div>
+
+<script>
+// =========================================================
+// Lenia — Continuous Cellular Automata (WebGL GPU-accelerated)
+// =========================================================
+// Bert Chan's Lenia: cells have real-valued states [0,1],
+// smooth ring kernel convolution, Gaussian growth function.
+// Creatures emerge, glide, interact, and die.
+//
+// Two-pass GPU pipeline:
+//   Pass 1: Convolution (kernel * state) → neighborhood potential
+//   Pass 2: Growth function + state update → new state
+// Rendering via a separate display shader with colour mapping.
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: false });
+if (!gl) { document.body.innerHTML = '<h2 style="color:#c00;padding:2rem">WebGL not available</h2>'; throw 'no webgl'; }
+
+// Simulation grid — 256 is smooth on Intel Iris Xe, 512 possible on dedicated GPU
+let N = 256;
+
+// Parameters
+let R = 13, mu = 0.15, sigma = 0.017, dt = 0.10;
+let paused = false, frameCount = 0, stepsPerFrame = 1;
+let brush = 'dot', brushRadius = 15, currentPalette = 0;
+let painting = false;
+
+// ---- WebGL setup ----
+function createShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+function createProgram(vSrc, fSrc) {
+  const p = gl.createProgram();
+  gl.attachShader(p, createShader(gl.VERTEX_SHADER, vSrc));
+  gl.attachShader(p, createShader(gl.FRAGMENT_SHADER, fSrc));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(p));
+    return null;
+  }
+  return p;
+}
+
+// Full-screen quad vertex shader
+const vertSrc = `
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0, 1);
+}`;
+
+// Step shader: convolution + growth + update in one pass
+// We compute the kernel sum inline. For R up to 30 this is manageable on GPU.
+const stepFragSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_state;
+uniform float u_R;
+uniform float u_mu;
+uniform float u_sigma;
+uniform float u_dt;
+uniform float u_N;
+
+void main() {
+  float invN = 1.0 / u_N;
+  float total = 0.0;
+  float ksum = 0.0;
+  int iR = int(u_R);
+
+  // Convolve with ring kernel
+  for (int dy = -30; dy <= 30; dy++) {
+    if (dy < -iR || dy > iR) continue;
+    for (int dx = -30; dx <= 30; dx++) {
+      if (dx < -iR || dx > iR) continue;
+      float d = sqrt(float(dx*dx + dy*dy)) / u_R;
+      if (d > 1.0) continue;
+      // Ring kernel peaked at d=0.5
+      float kr = (d - 0.5) / 0.15;
+      float k = exp(-0.5 * kr * kr);
+      vec2 nuv = fract(v_uv + vec2(float(dx), float(dy)) * invN);
+      float val = texture2D(u_state, nuv).r;
+      total += k * val;
+      ksum += k;
+    }
+  }
+
+  float u = total / max(ksum, 0.001);
+  float gv = (u - u_mu) / u_sigma;
+  float growth = 2.0 * exp(-0.5 * gv * gv) - 1.0;
+  float current = texture2D(u_state, v_uv).r;
+  float next = clamp(current + u_dt * growth, 0.0, 1.0);
+  gl_FragColor = vec4(next, 0.0, 0.0, 1.0);
+}`;
+
+// Display shader with palette
+const displayFragSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_state;
+uniform int u_palette;
+
+vec3 plasma(float t) {
+  if (t < 0.01) return vec3(0.04, 0.04, 0.07);
+  vec3 a = vec3(0.1, 0.0, 0.3);
+  vec3 b = vec3(0.8, 0.1, 0.5);
+  vec3 c = vec3(1.0, 0.6, 0.1);
+  vec3 d = vec3(1.0, 1.0, 0.7);
+  if (t < 0.33) return mix(a, b, t * 3.0);
+  if (t < 0.66) return mix(b, c, (t - 0.33) * 3.0);
+  return mix(c, d, (t - 0.66) * 3.0);
+}
+
+vec3 ocean(float t) {
+  if (t < 0.01) return vec3(0.03, 0.05, 0.08);
+  vec3 a = vec3(0.0, 0.05, 0.15);
+  vec3 b = vec3(0.0, 0.2, 0.4);
+  vec3 c = vec3(0.1, 0.5, 0.6);
+  vec3 d = vec3(0.5, 0.9, 0.95);
+  if (t < 0.33) return mix(a, b, t * 3.0);
+  if (t < 0.66) return mix(b, c, (t - 0.33) * 3.0);
+  return mix(c, d, (t - 0.66) * 3.0);
+}
+
+vec3 fire(float t) {
+  if (t < 0.01) return vec3(0.05, 0.02, 0.0);
+  vec3 a = vec3(0.15, 0.0, 0.0);
+  vec3 b = vec3(0.6, 0.1, 0.0);
+  vec3 c = vec3(1.0, 0.5, 0.0);
+  vec3 d = vec3(1.0, 1.0, 0.5);
+  if (t < 0.33) return mix(a, b, t * 3.0);
+  if (t < 0.66) return mix(b, c, (t - 0.33) * 3.0);
+  return mix(c, d, (t - 0.66) * 3.0);
+}
+
+vec3 ember(float t) {
+  if (t < 0.01) return vec3(0.04, 0.02, 0.04);
+  vec3 a = vec3(0.15, 0.0, 0.1);
+  vec3 b = vec3(0.5, 0.05, 0.15);
+  vec3 c = vec3(0.9, 0.3, 0.1);
+  vec3 d = vec3(1.0, 0.8, 0.4);
+  if (t < 0.33) return mix(a, b, t * 3.0);
+  if (t < 0.66) return mix(b, c, (t - 0.33) * 3.0);
+  return mix(c, d, (t - 0.66) * 3.0);
+}
+
+vec3 neon(float t) {
+  if (t < 0.01) return vec3(0.02, 0.02, 0.05);
+  vec3 a = vec3(0.0, 0.0, 0.2);
+  vec3 b = vec3(0.4, 0.0, 0.8);
+  vec3 c = vec3(0.0, 0.8, 0.6);
+  vec3 d = vec3(0.6, 1.0, 0.9);
+  if (t < 0.33) return mix(a, b, t * 3.0);
+  if (t < 0.66) return mix(b, c, (t - 0.33) * 3.0);
+  return mix(c, d, (t - 0.66) * 3.0);
+}
+
+vec3 mono(float t) {
+  if (t < 0.01) return vec3(0.04, 0.04, 0.055);
+  float v = t * 0.85 + 0.08;
+  return vec3(v * 0.9, v * 0.95, v);
+}
+
+void main() {
+  float v = texture2D(u_state, v_uv).r;
+  vec3 col;
+  if (u_palette == 0) col = plasma(v);
+  else if (u_palette == 1) col = ocean(v);
+  else if (u_palette == 2) col = fire(v);
+  else if (u_palette == 3) col = ember(v);
+  else if (u_palette == 4) col = neon(v);
+  else col = mono(v);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+// Brush shader — applies brush strokes to the state texture
+const brushFragSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_state;
+uniform vec2 u_brushPos;
+uniform float u_brushRadius;
+uniform float u_N;
+uniform int u_brushType; // 0=dot, 1=ring, 2=noise, 3=erase
+uniform float u_seed;
+
+float rand(vec2 co) {
+  return fract(sin(dot(co + u_seed, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+void main() {
+  float current = texture2D(u_state, v_uv).r;
+  vec2 diff = v_uv - u_brushPos;
+  // Handle wrapping
+  if (diff.x > 0.5) diff.x -= 1.0;
+  if (diff.x < -0.5) diff.x += 1.0;
+  if (diff.y > 0.5) diff.y -= 1.0;
+  if (diff.y < -0.5) diff.y += 1.0;
+  float dist = length(diff * u_N) / u_brushRadius;
+
+  float result = current;
+  if (dist < 1.0) {
+    if (u_brushType == 0) { // dot
+      float falloff = 1.0 - dist;
+      result = min(1.0, current + falloff * 0.6);
+    } else if (u_brushType == 1) { // ring
+      float ringDist = abs(dist - 0.6);
+      if (ringDist < 0.2) {
+        result = min(1.0, current + (0.2 - ringDist) * 3.0);
+      }
+    } else if (u_brushType == 2) { // noise
+      float r = rand(v_uv);
+      if (r < 0.35) {
+        result = min(1.0, current + r * 0.6 * (1.0 - dist));
+      }
+    } else { // erase
+      float falloff = 1.0 - dist;
+      result = max(0.0, current - falloff * 0.5);
+    }
+  }
+  gl_FragColor = vec4(result, 0.0, 0.0, 1.0);
+}`;
+
+// Compile programs
+const stepProg = createProgram(vertSrc, stepFragSrc);
+const displayProg = createProgram(vertSrc, displayFragSrc);
+const brushProg = createProgram(vertSrc, brushFragSrc);
+
+// Full-screen quad
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+function setupAttrib(prog) {
+  const loc = gl.getAttribLocation(prog, 'a_pos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+}
+
+// Try to get float texture support for higher precision
+const halfFloatExt = gl.getExtension('OES_texture_half_float');
+const floatExt = gl.getExtension('OES_texture_float');
+const halfFloatLinear = gl.getExtension('OES_texture_half_float_linear');
+const floatLinear = gl.getExtension('OES_texture_float_linear');
+
+// Determine best texture type
+let texType = gl.UNSIGNED_BYTE;
+let useFloat = false;
+if (halfFloatExt) {
+  texType = halfFloatExt.HALF_FLOAT_OES;
+  useFloat = true;
+} else if (floatExt) {
+  texType = gl.FLOAT;
+  useFloat = true;
+}
+
+// Create ping-pong framebuffers
+function createFBO() {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  if (useFloat) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, texType, null);
+  } else {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  }
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  // Check completeness
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE && useFloat) {
+    // Fallback to UNSIGNED_BYTE
+    console.warn('Float FBO not supported, falling back to UNSIGNED_BYTE');
+    useFloat = false;
+    texType = gl.UNSIGNED_BYTE;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  }
+  return { tex, fb };
+}
+
+let fboA = createFBO();
+let fboB = createFBO();
+let current = fboA, next = fboB;
+
+// Upload initial state to texture
+function uploadState(data) {
+  gl.bindTexture(gl.TEXTURE_2D, current.tex);
+  if (useFloat) {
+    // Upload as float RGBA
+    const pixels = new Float32Array(N * N * 4);
+    for (let i = 0; i < N * N; i++) {
+      pixels[i * 4] = data[i];
+      pixels[i * 4 + 1] = 0;
+      pixels[i * 4 + 2] = 0;
+      pixels[i * 4 + 3] = 1;
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, texType, pixels);
+  } else {
+    const pixels = new Uint8Array(N * N * 4);
+    for (let i = 0; i < N * N; i++) {
+      const v = Math.max(0, Math.min(255, Math.floor(data[i] * 255)));
+      pixels[i * 4] = v;
+      pixels[i * 4 + 1] = 0;
+      pixels[i * 4 + 2] = 0;
+      pixels[i * 4 + 3] = 255;
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  }
+}
+
+// Run one step
+function gpuStep() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, next.fb);
+  gl.viewport(0, 0, N, N);
+  gl.useProgram(stepProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  setupAttrib(stepProg);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, current.tex);
+  gl.uniform1i(gl.getUniformLocation(stepProg, 'u_state'), 0);
+  gl.uniform1f(gl.getUniformLocation(stepProg, 'u_R'), R);
+  gl.uniform1f(gl.getUniformLocation(stepProg, 'u_mu'), mu);
+  gl.uniform1f(gl.getUniformLocation(stepProg, 'u_sigma'), sigma);
+  gl.uniform1f(gl.getUniformLocation(stepProg, 'u_dt'), dt);
+  gl.uniform1f(gl.getUniformLocation(stepProg, 'u_N'), N);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // Swap
+  const tmp = current;
+  current = next;
+  next = tmp;
+}
+
+// Apply brush stroke
+function gpuBrush(uvx, uvy, type) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, next.fb);
+  gl.viewport(0, 0, N, N);
+  gl.useProgram(brushProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  setupAttrib(brushProg);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, current.tex);
+  gl.uniform1i(gl.getUniformLocation(brushProg, 'u_state'), 0);
+  gl.uniform2f(gl.getUniformLocation(brushProg, 'u_brushPos'), uvx, uvy);
+  gl.uniform1f(gl.getUniformLocation(brushProg, 'u_brushRadius'), brushRadius);
+  gl.uniform1f(gl.getUniformLocation(brushProg, 'u_N'), N);
+  gl.uniform1i(gl.getUniformLocation(brushProg, 'u_brushType'), type);
+  gl.uniform1f(gl.getUniformLocation(brushProg, 'u_seed'), Math.random() * 100);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  const tmp = current; current = next; next = tmp;
+}
+
+// Render to screen
+function gpuRender() {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(displayProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  setupAttrib(displayProg);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, current.tex);
+  gl.uniform1i(gl.getUniformLocation(displayProg, 'u_state'), 0);
+  gl.uniform1i(gl.getUniformLocation(displayProg, 'u_palette'), currentPalette);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// Species presets (carefully tuned for Lenia's parameter space)
+const species = {
+  'Orbium':       { R:13, mu:0.15,  sigma:0.017, dt:0.10, desc:'Classic glider — a smooth organism that orbits indefinitely' },
+  'Geminium':     { R:10, mu:0.14,  sigma:0.014, dt:0.10, desc:'Twin organisms that circle each other' },
+  'Scutium':      { R:15, mu:0.20,  sigma:0.030, dt:0.08, desc:'Shield-shaped stable creature with broad tolerance' },
+  'Hydrogeminium':{ R:12, mu:0.15,  sigma:0.015, dt:0.12, desc:'Fluid organisms that flow and merge' },
+  'Paterson':     { R:18, mu:0.26,  sigma:0.036, dt:0.06, desc:'Large slow creature with tendrils — needs patience' },
+  'Aquarium':     { R:11, mu:0.13,  sigma:0.013, dt:0.11, desc:'Small fast swimmers — seed many for an ecosystem' },
+  'Nebula':       { R:20, mu:0.30,  sigma:0.050, dt:0.05, desc:'Vast diffuse structures — cosmic scale patterns' },
+  'Spore':        { R: 8, mu:0.12,  sigma:0.012, dt:0.15, desc:'Tiny fast organisms — prolific and chaotic' },
+  'Primordial':   { R:14, mu:0.18,  sigma:0.022, dt:0.09, desc:'Rich parameter space — many creature types emerge' },
+  'Coral':        { R:16, mu:0.22,  sigma:0.028, dt:0.07, desc:'Branching growth structures like coral reefs' },
+};
+
+// Init species dropdown
+const sel = document.getElementById('species');
+for (const name in species) {
+  const opt = document.createElement('option');
+  opt.value = name;
+  opt.textContent = name;
+  sel.appendChild(opt);
+}
+
+function loadSpecies(name) {
+  const s = species[name];
+  if (!s) return;
+  R = s.R; mu = s.mu; sigma = s.sigma; dt = s.dt;
+  document.getElementById('pR').value = R;
+  document.getElementById('pMu').value = mu;
+  document.getElementById('pSigma').value = sigma;
+  document.getElementById('pDt').value = dt;
+  updateParamDisplay();
+  document.getElementById('speciesDesc').textContent = s.desc;
+  clearGrid();
+  randomSeed();
+}
+
+function updateParamDisplay() {
+  document.getElementById('vR').textContent = R;
+  document.getElementById('vMu').textContent = mu.toFixed(3);
+  document.getElementById('vSigma').textContent = sigma.toFixed(3);
+  document.getElementById('vDt').textContent = dt.toFixed(2);
+}
+
+function paramChanged() {
+  R = parseInt(document.getElementById('pR').value);
+  mu = parseFloat(document.getElementById('pMu').value);
+  sigma = parseFloat(document.getElementById('pSigma').value);
+  dt = parseFloat(document.getElementById('pDt').value);
+  updateParamDisplay();
+}
+
+function speedChanged() {
+  stepsPerFrame = parseInt(document.getElementById('pSpeed').value);
+  document.getElementById('vSpeed').textContent = stepsPerFrame;
+}
+
+function clearGrid() {
+  const data = new Float32Array(N * N);
+  uploadState(data);
+}
+
+function randomSeed() {
+  const data = new Float32Array(N * N);
+  // Read current state
+  gl.bindFramebuffer(gl.FRAMEBUFFER, current.fb);
+  const pixels = new Uint8Array(N * N * 4);
+  gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  for (let i = 0; i < N * N; i++) data[i] = pixels[i * 4] / 255;
+
+  // Place 4-7 random blobs
+  const count = 4 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < count; i++) {
+    const cx = Math.floor(Math.random() * N);
+    const cy = Math.floor(Math.random() * N);
+    const r = R + Math.floor(Math.random() * R * 0.7);
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > r) continue;
+        const nx = (cx + dx + N) % N;
+        const ny = (cy + dy + N) % N;
+        const falloff = 1 - (dist / r);
+        const noise = Math.random() * 0.25;
+        data[ny * N + nx] = Math.min(1, data[ny * N + nx] + falloff * 0.65 + noise * falloff);
+      }
+    }
+  }
+  uploadState(data);
+}
+
+function togglePause() {
+  paused = !paused;
+  document.getElementById('btnPause').textContent = paused ? 'Play' : 'Pause';
+  document.getElementById('btnPause').classList.toggle('active', paused);
+}
+
+function stepOnce() {
+  gpuStep();
+  frameCount++;
+  gpuRender();
+}
+
+function setBrush(type) {
+  brush = type;
+  document.querySelectorAll('[id^="b-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('b-' + type).classList.add('active');
+}
+
+function setPalette(idx, btn) {
+  currentPalette = idx;
+  document.querySelectorAll('#bar2 button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+function toggleParams() {
+  const panel = document.getElementById('params');
+  panel.classList.toggle('show');
+  document.getElementById('btnParams').classList.toggle('active', panel.classList.contains('show'));
+}
+
+// Brush type index
+function brushTypeIdx() {
+  return brush === 'dot' ? 0 : brush === 'ring' ? 1 : brush === 'noise' ? 2 : 3;
+}
+
+// Mouse/touch painting
+function paintAt(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const uvx = (clientX - rect.left) / rect.width;
+  const uvy = 1.0 - (clientY - rect.top) / rect.height; // flip Y for GL
+  gpuBrush(uvx, uvy, brushTypeIdx());
+}
+
+canvas.addEventListener('mousedown', e => { painting = true; paintAt(e.clientX, e.clientY); });
+canvas.addEventListener('mousemove', e => { if (painting) paintAt(e.clientX, e.clientY); });
+canvas.addEventListener('mouseup', () => painting = false);
+canvas.addEventListener('mouseleave', () => painting = false);
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  brushRadius = Math.max(3, Math.min(50, brushRadius + (e.deltaY > 0 ? -1 : 1)));
+  document.getElementById('brushSize').value = brushRadius;
+}, { passive: false });
+document.getElementById('brushSize').addEventListener('input', function() {
+  brushRadius = parseInt(this.value);
+});
+
+canvas.addEventListener('touchstart', e => { e.preventDefault(); painting = true; paintAt(e.touches[0].clientX, e.touches[0].clientY); });
+canvas.addEventListener('touchmove', e => { e.preventDefault(); if (painting) paintAt(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+canvas.addEventListener('touchend', () => painting = false);
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space') { e.preventDefault(); togglePause(); }
+  if (e.code === 'KeyC') clearGrid();
+  if (e.code === 'KeyR') randomSeed();
+  if (e.code === 'KeyS') stepOnce();
+  if (e.code === 'KeyP') toggleParams();
+  if (e.code === 'Digit1') setBrush('dot');
+  if (e.code === 'Digit2') setBrush('ring');
+  if (e.code === 'Digit3') setBrush('noise');
+  if (e.code === 'Digit4') setBrush('erase');
+});
+
+// Page Visibility API
+let wasPaused = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { wasPaused = paused; paused = true; }
+  else if (!wasPaused) paused = false;
+});
+
+// Resize
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Main loop
+function loop() {
+  requestAnimationFrame(loop);
+  if (!paused) {
+    for (let i = 0; i < stepsPerFrame; i++) {
+      gpuStep();
+      frameCount++;
+    }
+  }
+  gpuRender();
+
+  if (frameCount % 60 === 0) {
+    document.getElementById('info').textContent =
+      `Frame ${frameCount} | ${N}x${N} GPU | R=${R} \u03bc=${mu.toFixed(3)} \u03c3=${sigma.toFixed(3)} dt=${dt.toFixed(2)} | Click to paint, scroll to resize brush, Space to pause`;
+  }
+}
+
+// Init
+loadSpecies('Orbium');
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

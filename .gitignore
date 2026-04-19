@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+*.swp
+.idea/
+.vscode/
+node_modules/
+.superpowers/
+*.log
+.ai_slot_*

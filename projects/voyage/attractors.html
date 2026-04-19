@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Strange Attractors</title>
+<style>
+* { margin: 0; padding: 0; }
+body { background: #050508; overflow: hidden; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+#ui {
+  position: fixed; top: 0; left: 0; right: 0;
+  display: flex; justify-content: center; gap: 8px;
+  padding: 12px; z-index: 10;
+}
+.btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(200,210,220,0.7);
+  padding: 6px 14px;
+  font: 12px 'Courier New', monospace;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.3s;
+}
+.btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.btn.active { background: rgba(100,160,255,0.2); border-color: rgba(100,160,255,0.5); color: #8ac; }
+#info {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  color: rgba(200,210,220,0.35);
+  font: 11px/1.5 'Courier New', monospace;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 3s;
+}
+#equation {
+  position: fixed; bottom: 50px; left: 50%; transform: translateX(-50%);
+  color: rgba(180,200,220,0.5);
+  font: 13px/1.6 'Courier New', monospace;
+  text-align: center;
+  white-space: pre;
+  pointer-events: none;
+}
+#fps {
+  position: fixed; top: 12px; right: 12px;
+  color: rgba(200,210,220,0.2); font: 11px monospace;
+}
+</style>
+</head>
+<body>
+<div id="ui"></div>
+<canvas id="c"></canvas>
+<div id="equation"></div>
+<div id="info">drag to rotate · scroll to zoom · click attractor name to switch</div>
+<div id="fps"></div>
+
+<script>
+// === Strange Attractor Definitions ===
+const attractors = {
+  lorenz: {
+    name: 'Lorenz',
+    params: { sigma: 10, rho: 28, beta: 8/3 },
+    step(x, y, z, dt, p) {
+      return [
+        x + (p.sigma * (y - x)) * dt,
+        y + (x * (p.rho - z) - y) * dt,
+        z + (x * y - p.beta * z) * dt
+      ];
+    },
+    scale: 0.04,
+    origin: [0, 0, 25],
+    color: [0.3, 0.5, 1.0],
+    eq: 'dx/dt = σ(y - x)\ndy/dt = x(ρ - z) - y\ndz/dt = xy - βz\n\nσ=10  ρ=28  β=8/3'
+  },
+  rossler: {
+    name: 'Rössler',
+    params: { a: 0.2, b: 0.2, c: 5.7 },
+    step(x, y, z, dt, p) {
+      return [
+        x + (-y - z) * dt,
+        y + (x + p.a * y) * dt,
+        z + (p.b + z * (x - p.c)) * dt
+      ];
+    },
+    scale: 0.08,
+    origin: [0, 0, 0],
+    color: [1.0, 0.4, 0.3],
+    eq: 'dx/dt = -y - z\ndy/dt = x + ay\ndz/dt = b + z(x - c)\n\na=0.2  b=0.2  c=5.7'
+  },
+  thomas: {
+    name: 'Thomas',
+    params: { b: 0.208186 },
+    step(x, y, z, dt, p) {
+      return [
+        x + (-p.b * x + Math.sin(y)) * dt,
+        y + (-p.b * y + Math.sin(z)) * dt,
+        z + (-p.b * z + Math.sin(x)) * dt
+      ];
+    },
+    scale: 0.2,
+    origin: [0, 0, 0],
+    color: [0.4, 1.0, 0.5],
+    eq: 'dx/dt = -bx + sin(y)\ndy/dt = -by + sin(z)\ndz/dt = -bz + sin(x)\n\nb = 0.208186'
+  },
+  aizawa: {
+    name: 'Aizawa',
+    params: { a: 0.95, b: 0.7, c: 0.6, d: 3.5, e: 0.25, f: 0.1 },
+    step(x, y, z, dt, p) {
+      return [
+        x + ((z - p.b) * x - p.d * y) * dt,
+        y + (p.d * x + (z - p.b) * y) * dt,
+        z + (p.c + p.a * z - z*z*z/3 - (x*x + y*y) * (1 + p.e * z) + p.f * z * x*x*x) * dt
+      ];
+    },
+    scale: 0.25,
+    origin: [0, 0, 0],
+    color: [1.0, 0.7, 0.2],
+    eq: 'dx/dt = (z-b)x - dy\ndy/dt = dx + (z-b)y\ndz/dt = c + az - z³/3 - (x²+y²)(1+ez) + fzx³'
+  },
+  halvorsen: {
+    name: 'Halvorsen',
+    params: { a: 1.89 },
+    step(x, y, z, dt, p) {
+      return [
+        x + (-p.a * x - 4 * y - 4 * z - y * y) * dt,
+        y + (-p.a * y - 4 * z - 4 * x - z * z) * dt,
+        z + (-p.a * z - 4 * x - 4 * y - x * x) * dt
+      ];
+    },
+    scale: 0.06,
+    origin: [0, 0, 0],
+    color: [0.8, 0.3, 1.0],
+    eq: 'dx/dt = -ax - 4y - 4z - y²\ndy/dt = -ay - 4z - 4x - z²\ndz/dt = -az - 4x - 4y - x²\n\na = 1.89'
+  },
+  dadras: {
+    name: 'Dadras',
+    params: { p: 3, q: 2.7, r: 1.7, s: 2, e: 9 },
+    step(x, y, z, dt, pr) {
+      return [
+        x + (y - pr.p * x + pr.q * y * z) * dt,
+        y + (pr.r * y - x * z + z) * dt,
+        z + (pr.s * x * y - pr.e * z) * dt
+      ];
+    },
+    scale: 0.06,
+    origin: [0, 0, 0],
+    color: [0.3, 0.9, 0.9],
+    eq: 'dx/dt = y - px + qyz\ndy/dt = ry - xz + z\ndz/dt = sxy - ez\n\np=3 q=2.7 r=1.7 s=2 e=9'
+  }
+};
+
+// === Canvas setup ===
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+const NUM_PARTICLES = 4000;
+const TRAIL_LENGTH = 60;
+
+let current = 'lorenz';
+let particles = [];
+let rotX = -0.3, rotY = 0.5;
+let targetRotX = rotX, targetRotY = rotY;
+let zoom = 1, targetZoom = 1;
+let dragging = false;
+
+// === UI ===
+const ui = document.getElementById('ui');
+Object.keys(attractors).forEach(key => {
+  const btn = document.createElement('button');
+  btn.className = 'btn' + (key === current ? ' active' : '');
+  btn.textContent = attractors[key].name;
+  btn.onclick = () => switchAttractor(key);
+  btn.dataset.key = key;
+  ui.appendChild(btn);
+});
+
+function switchAttractor(key) {
+  if (key === current) return;
+  current = key;
+  initParticles();
+  document.querySelectorAll('.btn').forEach(b => b.classList.toggle('active', b.dataset.key === key));
+  document.getElementById('equation').textContent = attractors[key].eq;
+}
+
+// === Particle system ===
+function initParticles() {
+  const a = attractors[current];
+  particles = [];
+  for (let i = 0; i < NUM_PARTICLES; i++) {
+    const ox = a.origin[0], oy = a.origin[1], oz = a.origin[2];
+    particles.push({
+      x: ox + (Math.random() - 0.5) * 2,
+      y: oy + (Math.random() - 0.5) * 2,
+      z: oz + (Math.random() - 0.5) * 2,
+      trail: [],
+      age: Math.random() * 500
+    });
+  }
+}
+
+function stepParticles() {
+  const a = attractors[current];
+  const dt = 0.004;
+  const steps = 3;
+
+  for (const p of particles) {
+    for (let s = 0; s < steps; s++) {
+      const [nx, ny, nz] = a.step(p.x, p.y, p.z, dt, a.params);
+
+      // Check for divergence
+      if (Math.abs(nx) > 200 || Math.abs(ny) > 200 || Math.abs(nz) > 200 || isNaN(nx)) {
+        const ox = a.origin[0], oy = a.origin[1], oz = a.origin[2];
+        p.x = ox + (Math.random() - 0.5) * 2;
+        p.y = oy + (Math.random() - 0.5) * 2;
+        p.z = oz + (Math.random() - 0.5) * 2;
+        p.trail = [];
+        break;
+      }
+
+      p.x = nx; p.y = ny; p.z = nz;
+    }
+
+    p.trail.push([p.x, p.y, p.z]);
+    if (p.trail.length > TRAIL_LENGTH) p.trail.shift();
+    p.age++;
+  }
+}
+
+// === 3D projection ===
+function project(x, y, z) {
+  const a = attractors[current];
+  // Center on origin
+  x -= a.origin[0]; y -= a.origin[1]; z -= a.origin[2];
+  // Scale
+  const s = a.scale * zoom;
+  x *= s; y *= s; z *= s;
+
+  // Rotate Y
+  const cy = Math.cos(rotY), sy = Math.sin(rotY);
+  const rx = x * cy - z * sy;
+  const rz = x * sy + z * cy;
+  // Rotate X
+  const cx = Math.cos(rotX), sx = Math.sin(rotX);
+  const ry = y * cx - rz * sx;
+  const rz2 = y * sx + rz * cx;
+
+  // Perspective
+  const d = 3;
+  const perspective = d / (d + rz2 + 2);
+  const sx2 = rx * perspective * Math.min(canvas.width, canvas.height) * 0.4 + canvas.width / 2;
+  const sy2 = -ry * perspective * Math.min(canvas.width, canvas.height) * 0.4 + canvas.height / 2;
+
+  return [sx2, sy2, perspective];
+}
+
+// === Rendering ===
+function render() {
+  ctx.fillStyle = 'rgba(5, 5, 8, 0.15)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const a = attractors[current];
+  const [cr, cg, cb] = a.color;
+
+  // Sort particles by depth for proper layering (optional, skip for perf)
+  for (const p of particles) {
+    if (p.trail.length < 2) continue;
+
+    const trailLen = p.trail.length;
+    ctx.beginPath();
+
+    for (let i = 0; i < trailLen; i++) {
+      const [px, py, pz] = project(p.trail[i][0], p.trail[i][1], p.trail[i][2]);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+
+    const alpha = Math.min(0.25, 0.08 + (trailLen / TRAIL_LENGTH) * 0.15);
+    const bright = 0.6 + 0.4 * (trailLen / TRAIL_LENGTH);
+    ctx.strokeStyle = `rgba(${Math.floor(cr * bright * 255)}, ${Math.floor(cg * bright * 255)}, ${Math.floor(cb * bright * 255)}, ${alpha})`;
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+
+    // Bright point at head
+    if (trailLen > 5) {
+      const [hx, hy, hz] = project(p.x, p.y, p.z);
+      const r = Math.max(0.5, 1.5 * hz);
+      ctx.fillStyle = `rgba(${Math.floor(cr * 255)}, ${Math.floor(cg * 255)}, ${Math.floor(cb * 255)}, 0.5)`;
+      ctx.beginPath();
+      ctx.arc(hx, hy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// === Interaction ===
+canvas.addEventListener('mousedown', () => dragging = true);
+window.addEventListener('mouseup', () => dragging = false);
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  targetRotY += e.movementX * 0.005;
+  targetRotX += e.movementY * 0.005;
+  targetRotX = Math.max(-Math.PI/2, Math.min(Math.PI/2, targetRotX));
+});
+
+let lastTouch = null;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!lastTouch || e.touches.length !== 1) return;
+  const dx = e.touches[0].clientX - lastTouch.x;
+  const dy = e.touches[0].clientY - lastTouch.y;
+  targetRotY += dx * 0.005;
+  targetRotX += dy * 0.005;
+  targetRotX = Math.max(-Math.PI/2, Math.min(Math.PI/2, targetRotX));
+  lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+});
+canvas.addEventListener('touchend', () => lastTouch = null);
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  targetZoom *= e.deltaY > 0 ? 0.92 : 1.08;
+  targetZoom = Math.max(0.2, Math.min(5, targetZoom));
+}, { passive: false });
+
+function resize() {
+  canvas.width = innerWidth;
+  canvas.height = innerHeight;
+  // Clear trails on resize to avoid artifacts
+  ctx.fillStyle = '#050508';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+addEventListener('resize', resize);
+resize();
+
+setTimeout(() => document.getElementById('info').style.opacity = '0', 6000);
+
+// === Init ===
+document.getElementById('equation').textContent = attractors[current].eq;
+initParticles();
+
+let fc = 0, ft = performance.now();
+
+function loop() {
+  rotX += (targetRotX - rotX) * 0.08;
+  rotY += (targetRotY - rotY) * 0.08;
+  zoom += (targetZoom - zoom) * 0.08;
+
+  // Auto-rotate slowly
+  targetRotY += 0.001;
+
+  stepParticles();
+  render();
+
+  fc++;
+  if (performance.now() - ft > 1000) {
+    document.getElementById('fps').textContent = fc + ' fps';
+    fc = 0; ft = performance.now();
+  }
+
+  if (!document.hidden) requestAnimationFrame(loop);
+}
+loop();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loop(); });
+</script>
+</body>
+</html>

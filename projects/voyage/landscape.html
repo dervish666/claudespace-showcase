@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Landscape — Procedural Vista Generator</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a12; overflow: hidden; font-family: 'Courier New', monospace; color: #b0c8e0; }
+canvas { display: block; }
+#controls {
+  position: fixed; right: 0; top: 0; bottom: 0; width: 240px;
+  background: rgba(8,10,18,0.92); border-left: 1px solid rgba(100,140,180,0.2);
+  padding: 16px; overflow-y: auto; z-index: 10;
+  backdrop-filter: blur(8px);
+}
+#controls::-webkit-scrollbar { width: 4px; }
+#controls::-webkit-scrollbar-thumb { background: rgba(100,140,180,0.3); border-radius: 2px; }
+h2 { font-size: 13px; letter-spacing: 2px; color: rgba(100,160,220,0.7); margin-bottom: 14px; font-weight: 400; }
+h3 { font-size: 10px; letter-spacing: 1px; color: rgba(100,160,220,0.5); margin: 14px 0 6px; font-weight: 400; text-transform: uppercase; }
+.row { margin-bottom: 8px; }
+.row label { display: block; font-size: 10px; color: rgba(160,190,220,0.6); margin-bottom: 3px; }
+.row input[type="range"] {
+  width: 100%; height: 4px; -webkit-appearance: none; background: rgba(100,140,180,0.15);
+  border-radius: 2px; outline: none;
+}
+.row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+  background: rgba(100,160,220,0.6); cursor: pointer;
+}
+.row .val { float: right; color: rgba(100,160,220,0.5); font-size: 9px; }
+.btn-row { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+.btn {
+  flex: 1; min-width: 60px; background: rgba(100,140,180,0.1); border: 1px solid rgba(100,140,180,0.2);
+  color: rgba(160,190,220,0.7); padding: 6px 8px; border-radius: 4px;
+  cursor: pointer; font-family: inherit; font-size: 10px; text-align: center; transition: all 0.2s;
+}
+.btn:hover { background: rgba(100,140,180,0.2); border-color: rgba(100,180,255,0.4); }
+.btn.active { background: rgba(100,140,180,0.25); border-color: rgba(100,180,255,0.5); color: #8ac0ff; }
+#status { font-size: 9px; color: rgba(100,140,180,0.4); margin-top: 12px; text-align: center; }
+#presets { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+#presets .btn { min-width: 44px; font-size: 9px; padding: 4px 6px; }
+a.back { position: fixed; bottom: 12px; right: 252px; font-size: 10px; color: rgba(100,160,220,0.4); text-decoration: none; z-index: 10; }
+a.back:hover { color: rgba(100,160,220,0.8); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<a class="back" href="/">← Voyage</a>
+
+<div id="controls">
+  <h2>LANDSCAPE</h2>
+  <div style="font-size:9px;color:rgba(100,140,180,0.35);margin-bottom:12px;line-height:1.5">
+    Procedural vista generator.<br>Inspired by Terragen & Vista Pro.
+  </div>
+
+  <div id="presets">
+    <button class="btn" onclick="loadPreset('alpine')">Alpine</button>
+    <button class="btn" onclick="loadPreset('desert')">Desert</button>
+    <button class="btn" onclick="loadPreset('islands')">Islands</button>
+    <button class="btn" onclick="loadPreset('arctic')">Arctic</button>
+    <button class="btn" onclick="loadPreset('canyon')">Canyon</button>
+    <button class="btn" onclick="loadPreset('volcanic')">Volcanic</button>
+  </div>
+
+  <h3>Terrain</h3>
+  <div class="row"><label>Seed <span class="val" id="vSeed">42</span></label><input type="range" id="seed" min="1" max="999" value="42" step="1"></div>
+  <div class="row"><label>Height <span class="val" id="vHeight">0.50</span></label><input type="range" id="height" min="0" max="100" value="50"></div>
+  <div class="row"><label>Roughness <span class="val" id="vRough">0.55</span></label><input type="range" id="roughness" min="0" max="100" value="55"></div>
+  <div class="row"><label>Scale <span class="val" id="vScale">0.50</span></label><input type="range" id="scale" min="0" max="100" value="50"></div>
+
+  <h3>Water</h3>
+  <div class="row"><label>Water Level <span class="val" id="vWater">0.25</span></label><input type="range" id="water" min="0" max="100" value="25"></div>
+  <div class="row"><label>Wave Height <span class="val" id="vWave">0.30</span></label><input type="range" id="wave" min="0" max="100" value="30"></div>
+
+  <h3>Atmosphere</h3>
+  <div class="row"><label>Haze <span class="val" id="vHaze">0.40</span></label><input type="range" id="haze" min="0" max="100" value="40"></div>
+  <div class="row"><label>Cloud Cover <span class="val" id="vCloud">0.45</span></label><input type="range" id="cloud" min="0" max="100" value="45"></div>
+  <div class="row"><label>Cloud Height <span class="val" id="vCloudH">0.60</span></label><input type="range" id="cloudH" min="0" max="100" value="60"></div>
+
+  <h3>Lighting</h3>
+  <div class="row"><label>Sun Elevation <span class="val" id="vSunE">0.35</span></label><input type="range" id="sunElev" min="0" max="100" value="35"></div>
+  <div class="row"><label>Sun Azimuth <span class="val" id="vSunA">0.70</span></label><input type="range" id="sunAz" min="0" max="100" value="70"></div>
+
+  <h3>Camera</h3>
+  <div class="row"><label>Altitude <span class="val" id="vAlt">0.30</span></label><input type="range" id="altitude" min="0" max="100" value="30"></div>
+  <div class="row"><label>Look Down <span class="val" id="vLook">0.15</span></label><input type="range" id="lookDown" min="0" max="100" value="15"></div>
+  <div class="row"><label>FOV <span class="val" id="vFov">0.60</span></label><input type="range" id="fov" min="10" max="100" value="60"></div>
+
+  <h3>Palette</h3>
+  <div class="btn-row">
+    <button class="btn active" onclick="setPalette(0,this)">Earth</button>
+    <button class="btn" onclick="setPalette(1,this)">Mars</button>
+    <button class="btn" onclick="setPalette(2,this)">Ice</button>
+    <button class="btn" onclick="setPalette(3,this)">Alien</button>
+  </div>
+
+  <div class="btn-row" style="margin-top:16px">
+    <button class="btn" onclick="randomize()" style="min-width:100%">Randomize</button>
+  </div>
+  <div class="btn-row">
+    <button class="btn" onclick="renderHQ()">Hi-Res Render</button>
+    <button class="btn" onclick="exportImage()">Save Image</button>
+  </div>
+
+  <div id="status">Ready</div>
+</div>
+
+<script>
+// === Canvas setup ===
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, imgData, pixels;
+let rendering = false;
+let currentPalette = 0;
+let renderTimer = null;
+
+function resize() {
+  W = window.innerWidth - 240;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+  imgData = ctx.createImageData(W, H);
+  pixels = imgData.data;
+  scheduleRender();
+}
+window.addEventListener('resize', resize);
+
+// === Noise ===
+function hash(x, y, seed) {
+  let h = (x * 374761393 + y * 668265263 + seed * 1274126177) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h = Math.imul(h ^ (h >>> 16), 668265263);
+  return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+}
+
+function smoothNoise(x, y, seed) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const a = hash(ix, iy, seed);
+  const b = hash(ix + 1, iy, seed);
+  const c = hash(ix, iy + 1, seed);
+  const d = hash(ix + 1, iy + 1, seed);
+  return a * (1 - sx) * (1 - sy) + b * sx * (1 - sy) + c * (1 - sx) * sy + d * sx * sy;
+}
+
+function fbm(x, y, seed, octaves, roughness) {
+  let val = 0, amp = 1, freq = 1, total = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += smoothNoise(x * freq, y * freq, seed + i * 31) * amp;
+    total += amp;
+    amp *= roughness;
+    freq *= 2;
+  }
+  return val / total;
+}
+
+// === Palettes ===
+const palettes = [
+  // Earth
+  { water: [30, 60, 110], waterDeep: [15, 30, 70], sand: [180, 170, 130], grass: [70, 120, 50], rock: [120, 110, 100], snow: [240, 245, 250], sky: [135, 180, 230], skyHorizon: [200, 215, 235], sunColor: [255, 240, 200] },
+  // Mars
+  { water: [80, 40, 30], waterDeep: [50, 25, 20], sand: [190, 120, 70], grass: [160, 100, 60], rock: [140, 80, 50], snow: [220, 180, 150], sky: [180, 120, 80], skyHorizon: [210, 160, 120], sunColor: [255, 200, 140] },
+  // Ice
+  { water: [40, 70, 100], waterDeep: [20, 40, 70], sand: [180, 200, 210], grass: [150, 180, 190], rock: [160, 170, 180], snow: [230, 240, 250], sky: [160, 190, 220], skyHorizon: [200, 215, 230], sunColor: [220, 230, 255] },
+  // Alien
+  { water: [50, 30, 80], waterDeep: [25, 15, 50], sand: [120, 100, 60], grass: [40, 100, 80], rock: [80, 70, 90], snow: [180, 160, 200], sky: [60, 40, 100], skyHorizon: [120, 80, 140], sunColor: [200, 160, 255] }
+];
+
+function lerpColor(a, b, t) {
+  t = Math.max(0, Math.min(1, t));
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
+// === Terrain color ===
+function getTerrainColor(h, normal_y, pal, waterLevel, maxH) {
+  if (h <= waterLevel) {
+    const depth = (waterLevel - h) / Math.max(waterLevel, 10);
+    return lerpColor(pal.water, pal.waterDeep, Math.min(depth, 1));
+  }
+  const range = Math.max(maxH - waterLevel, 50);
+  const relH = (h - waterLevel) / range;
+  if (relH < 0.03) return lerpColor(pal.sand, pal.grass, relH / 0.03);
+  if (relH < 0.35) return lerpColor(pal.grass, pal.rock, (relH - 0.03) / 0.32);
+  if (relH < 0.65) return lerpColor(pal.rock, [pal.rock[0]*0.85, pal.rock[1]*0.85, pal.rock[2]*0.9], (relH - 0.35) / 0.3);
+  return lerpColor(pal.rock, pal.snow, (relH - 0.65) / 0.35);
+}
+
+// === Get params ===
+function getParams() {
+  return {
+    seed: parseInt(document.getElementById('seed').value),
+    height: 50 + parseInt(document.getElementById('height').value) / 100 * 400, // 50-450 world units
+    roughness: 0.3 + parseInt(document.getElementById('roughness').value) / 100 * 0.5,
+    scale: 0.5 + parseInt(document.getElementById('scale').value) / 100 * 4,
+    waterLevel: parseInt(document.getElementById('water').value) / 100 * 150, // 0-150 world units
+    waveHeight: parseInt(document.getElementById('wave').value) / 100,
+    haze: parseInt(document.getElementById('haze').value) / 100,
+    cloudCover: parseInt(document.getElementById('cloud').value) / 100,
+    cloudHeight: 200 + parseInt(document.getElementById('cloudH').value) / 100 * 400, // 200-600 world units
+    sunElev: parseInt(document.getElementById('sunElev').value) / 100 * Math.PI * 0.45,
+    sunAz: parseInt(document.getElementById('sunAz').value) / 100 * Math.PI * 2,
+    camAlt: 20 + parseInt(document.getElementById('altitude').value) / 100 * 400, // 20-420 world units
+    lookDown: parseInt(document.getElementById('lookDown').value) / 100 * 0.5,
+    fovDeg: parseInt(document.getElementById('fov').value),
+    palette: currentPalette
+  };
+}
+
+// === Render ===
+function renderScene(targetW, targetH, targetPixels) {
+  const p = getParams();
+  const pal = palettes[p.palette];
+  const fov = p.fovDeg * Math.PI / 180;
+  const aspectRatio = targetW / targetH;
+
+  // Sun direction
+  const sunX = Math.cos(p.sunAz) * Math.cos(p.sunElev);
+  const sunY = Math.sin(p.sunElev);
+  const sunZ = Math.sin(p.sunAz) * Math.cos(p.sunElev);
+
+  // Sky colors based on sun elevation
+  const sunFactor = Math.max(0, sunY);
+  const duskFactor = Math.max(0, 1 - sunY * 3);
+  const skyBase = lerpColor(pal.sky, [20, 25, 40], duskFactor * 0.7);
+  const horizonBase = lerpColor(pal.skyHorizon, lerpColor(pal.sunColor, [40, 30, 50], 0.5), duskFactor * 0.6);
+
+  // Terrain height function — returns world-space height (0 to p.height)
+  function terrainH(wx, wz) {
+    let h = fbm(wx * p.scale * 0.002, wz * p.scale * 0.002, p.seed, 7, p.roughness);
+    // Add ridges for more dramatic features
+    const ridge = fbm(wx * p.scale * 0.0015 + 50, wz * p.scale * 0.0015 + 50, p.seed + 100, 4, 0.5);
+    h += Math.abs(ridge - 0.5) * 0.35;
+    // Occasional sharp peaks
+    const peak = fbm(wx * p.scale * 0.001, wz * p.scale * 0.001, p.seed + 200, 3, 0.4);
+    if (peak > 0.65) h += (peak - 0.65) * 2;
+    return Math.max(0, h) * p.height;
+  }
+
+  // Cloud function
+  function cloudDensity(wx, wz) {
+    const c = fbm(wx * 0.0008, wz * 0.0008, p.seed + 500, 5, 0.55);
+    return Math.max(0, (c - (1 - p.cloudCover)) / p.cloudCover);
+  }
+
+  // Ray marching parameters
+  const maxDist = 3000;
+  const camY = p.camAlt;
+
+  for (let py = 0; py < targetH; py++) {
+    // Ray direction
+    const ndy = (0.5 - py / targetH) * fov + p.lookDown * 0.5 - 0.15;
+
+    for (let px = 0; px < targetW; px++) {
+      const ndx = (px / targetW - 0.5) * fov * aspectRatio;
+
+      // Ray direction (simple — looking along Z)
+      const rdx = ndx;
+      const rdy = ndy;
+      const rdz = 1;
+      const len = Math.sqrt(rdx * rdx + rdy * rdy + rdz * rdz);
+      const dx = rdx / len, dy = rdy / len, dz = rdz / len;
+
+      let r, g, b;
+      let hitDist = -1;
+
+      if (dy >= -0.001 && ndy > 0.05) {
+        // Looking up — sky only
+        r = g = b = 0; // will be set below in sky section
+      } else {
+        // March along ray to find terrain intersection
+        let t = 1;
+        let hit = false;
+        let wx, wy, wz;
+        let step = 1.5;
+
+        for (let i = 0; i < 300 && t < maxDist; i++) {
+          wx = dx * t;
+          wy = camY + dy * t;
+          wz = dz * t;
+
+          if (wy < 0) { wy = 0; }
+
+          const th = terrainH(wx, wz);
+          const waterH = p.waterLevel;
+          const surfaceH = Math.max(th, waterH);
+
+          if (wy <= surfaceH) {
+            hit = true;
+            hitDist = t;
+            break;
+          }
+
+          // Adaptive step — bigger when far from surface
+          const gap = wy - surfaceH;
+          step = Math.max(1, Math.min(gap * 0.5, 20 + t * 0.04));
+          t += step;
+        }
+
+        if (hit) {
+          const th = terrainH(wx, wz);
+          const isWater = th < p.waterLevel;
+
+          // Normal via finite differences
+          const eps = 2 + t * 0.01;
+          let nx, ny, nz;
+
+          if (isWater) {
+            // Water normal with waves
+            const waveScale = p.waveHeight * 0.5;
+            const wn1 = Math.sin(wx * 0.05) * Math.cos(wz * 0.03) * waveScale;
+            const wn2 = Math.cos(wx * 0.03) * Math.sin(wz * 0.05) * waveScale;
+            nx = wn1;
+            ny = 1;
+            nz = wn2;
+          } else {
+            const hL = terrainH(wx - eps, wz);
+            const hR = terrainH(wx + eps, wz);
+            const hU = terrainH(wx, wz - eps);
+            const hD = terrainH(wx, wz + eps);
+            nx = (hL - hR);
+            ny = eps * 2;
+            nz = (hU - hD);
+          }
+          // Normalize
+          const nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+          nx /= nl; ny /= nl; nz /= nl;
+
+          // Lighting
+          const diffuse = Math.max(0, nx * sunX + ny * sunY + nz * sunZ);
+          const ambient = 0.25 + sunFactor * 0.1;
+          let light = ambient + diffuse * 0.7;
+
+          // Get color
+          let col;
+          if (isWater) {
+            const depth = (p.waterLevel - th) / Math.max(p.waterLevel, 10);
+            col = lerpColor(pal.water, pal.waterDeep, Math.min(depth, 1));
+            // Specular reflection on water
+            const halfX = (sunX + 0) / 2, halfY = (sunY + 1) / 2, halfZ = (sunZ + 0) / 2;
+            const hl = Math.sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ);
+            const spec = Math.pow(Math.max(0, nx * halfX / hl + ny * halfY / hl + nz * halfZ / hl), 40);
+            light += spec * 0.5 * sunFactor;
+            // Sky reflection
+            col = lerpColor(col, skyBase, 0.15);
+          } else {
+            col = getTerrainColor(th, ny, pal, p.waterLevel, p.height);
+            // Slope-based rock
+            if (ny < 0.7 && th > p.waterLevel + 0.05) {
+              col = lerpColor(col, pal.rock, (0.7 - ny) / 0.3);
+            }
+          }
+
+          // Apply lighting
+          r = col[0] * light;
+          g = col[1] * light;
+          b = col[2] * light;
+
+          // Sun color tinting
+          r = r * (1 - duskFactor * 0.3) + pal.sunColor[0] * diffuse * duskFactor * 0.15;
+          g = g * (1 - duskFactor * 0.2) + pal.sunColor[1] * diffuse * duskFactor * 0.1;
+          b = b * (1 - duskFactor * 0.1) + pal.sunColor[2] * diffuse * duskFactor * 0.05;
+
+          // Distance fog / atmospheric haze
+          const fogFactor = 1 - Math.exp(-t * p.haze * 0.001);
+          const fogColor = lerpColor(horizonBase, pal.sunColor, Math.max(0, dx * sunX + dz * sunZ) * 0.15 * sunFactor);
+          r = r * (1 - fogFactor) + fogColor[0] * fogFactor;
+          g = g * (1 - fogFactor) + fogColor[1] * fogFactor;
+          b = b * (1 - fogFactor) + fogColor[2] * fogFactor;
+
+        } else {
+          hitDist = maxDist;
+          r = g = b = 0; // sky
+        }
+      }
+
+      // Sky (when no terrain hit or looking up)
+      if (hitDist < 0 || hitDist >= maxDist - 1) {
+        // Gradient from sky to horizon
+        const skyT = Math.max(0, dy * 3);
+        const skyCol = lerpColor(horizonBase, skyBase, Math.min(skyT, 1));
+        r = skyCol[0];
+        g = skyCol[1];
+        b = skyCol[2];
+
+        // Sun disc
+        const sunDot = dx * sunX + dy * sunY + dz * sunZ;
+        if (sunDot > 0.998) {
+          const sunIntensity = Math.pow((sunDot - 0.998) / 0.002, 0.5);
+          r = r + (pal.sunColor[0] - r) * sunIntensity;
+          g = g + (pal.sunColor[1] - g) * sunIntensity;
+          b = b + (pal.sunColor[2] - b) * sunIntensity;
+        }
+        // Sun glow
+        if (sunDot > 0.95) {
+          const glowI = Math.pow((sunDot - 0.95) / 0.05, 2) * 0.4;
+          r += pal.sunColor[0] * glowI * 0.3;
+          g += pal.sunColor[1] * glowI * 0.25;
+          b += pal.sunColor[2] * glowI * 0.2;
+        }
+
+        // Clouds
+        if (p.cloudCover > 0.01 && dy > -0.1) {
+          const cloudAlt = p.cloudHeight;
+          if (dy > 0.001) {
+            const ct = (cloudAlt - camY) / dy;
+            if (ct > 0 && ct < maxDist * 3) {
+              const cwx = dx * ct;
+              const cwz = dz * ct;
+              const cd = cloudDensity(cwx, cwz);
+              if (cd > 0) {
+                // Cloud lighting — brighter on sun side
+                const cloudLight = 0.7 + 0.3 * sunFactor;
+                const cloudCol = [
+                  Math.min(255, 240 * cloudLight + pal.sunColor[0] * 0.1),
+                  Math.min(255, 240 * cloudLight + pal.sunColor[1] * 0.08),
+                  Math.min(255, 245 * cloudLight + pal.sunColor[2] * 0.05)
+                ];
+                // Cloud shadow (bottom darker)
+                const cloudShadow = lerpColor(cloudCol, [cloudCol[0] * 0.5, cloudCol[1] * 0.5, cloudCol[2] * 0.6], 0.2);
+                const finalCloud = lerpColor(cloudShadow, cloudCol, sunFactor);
+                const alpha = Math.min(cd * 1.5, 0.95);
+                r = r * (1 - alpha) + finalCloud[0] * alpha;
+                g = g * (1 - alpha) + finalCloud[1] * alpha;
+                b = b * (1 - alpha) + finalCloud[2] * alpha;
+              }
+            }
+          }
+        }
+      }
+
+      // Cloud shadows on terrain
+      if (hitDist > 0 && hitDist < maxDist - 1 && p.cloudCover > 0.01) {
+        const wx = dx * hitDist;
+        const wz = dz * hitDist;
+        const cd = cloudDensity(wx, wz) * 0.4;
+        if (cd > 0) {
+          r *= (1 - cd);
+          g *= (1 - cd);
+          b *= (1 - cd * 0.8);
+        }
+      }
+
+      // Write pixel
+      const idx = (py * targetW + px) * 4;
+      targetPixels[idx] = Math.max(0, Math.min(255, r | 0));
+      targetPixels[idx + 1] = Math.max(0, Math.min(255, g | 0));
+      targetPixels[idx + 2] = Math.max(0, Math.min(255, b | 0));
+      targetPixels[idx + 3] = 255;
+    }
+  }
+}
+
+// === Progressive render ===
+let renderRow = 0;
+let lowResRendered = false;
+
+function scheduleRender() {
+  if (renderTimer) clearTimeout(renderTimer);
+  renderTimer = setTimeout(() => {
+    startRender();
+  }, 100);
+}
+
+let progressiveRender = null;
+
+function startRender() {
+  // Cancel any in-progress render
+  if (progressiveRender) { cancelAnimationFrame(progressiveRender); progressiveRender = null; }
+  rendering = true;
+  document.getElementById('status').textContent = 'Rendering preview...';
+
+  // Quick low-res preview (1/6 scale for speed)
+  const previewScale = 6;
+  const pw = Math.floor(W / previewScale);
+  const ph = Math.floor(H / previewScale);
+  const previewData = ctx.createImageData(pw, ph);
+  renderScene(pw, ph, previewData.data);
+
+  // Scale up to canvas
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width = pw;
+  tmpCanvas.height = ph;
+  const tmpCtx = tmpCanvas.getContext('2d');
+  tmpCtx.putImageData(previewData, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(tmpCanvas, 0, 0, W, H);
+
+  // Progressive full-res render (row by row, yielding to browser)
+  imgData = ctx.createImageData(W, H);
+  pixels = imgData.data;
+  let row = 0;
+  const rowsPerFrame = 1; // render 1 row per frame to avoid blocking compositor
+
+  function renderRows() {
+    const endRow = Math.min(row + rowsPerFrame, H);
+
+    // Render a stripe using a temporary small imageData
+    const stripeW = W;
+    const stripeH = endRow - row;
+    const stripeData = ctx.createImageData(stripeW, stripeH);
+    // Render just these rows
+    renderStripe(stripeW, stripeH, stripeData.data, row, H);
+    // Copy stripe into main buffer and display
+    ctx.putImageData(stripeData, 0, row);
+    // Also copy into full imgData for export
+    for (let y = 0; y < stripeH; y++) {
+      for (let x = 0; x < stripeW; x++) {
+        const srcIdx = (y * stripeW + x) * 4;
+        const dstIdx = ((row + y) * W + x) * 4;
+        pixels[dstIdx] = stripeData.data[srcIdx];
+        pixels[dstIdx+1] = stripeData.data[srcIdx+1];
+        pixels[dstIdx+2] = stripeData.data[srcIdx+2];
+        pixels[dstIdx+3] = 255;
+      }
+    }
+
+    row = endRow;
+    const pct = Math.floor(row / H * 100);
+    document.getElementById('status').textContent = `Rendering... ${pct}%`;
+
+    if (row < H) {
+      progressiveRender = requestAnimationFrame(renderRows);
+    } else {
+      rendering = false;
+      progressiveRender = null;
+      document.getElementById('status').textContent = `${W}×${H}`;
+    }
+  }
+  progressiveRender = requestAnimationFrame(renderRows);
+}
+
+// Render a stripe of rows (startRow to startRow+stripeH within a fullH-tall image)
+function renderStripe(w, h, targetPixels, startRow, fullH) {
+  const p = getParams();
+  const pal = palettes[p.palette];
+  const fov = p.fovDeg * Math.PI / 180;
+  const aspectRatio = W / fullH * (fullH / 1); // W/fullH
+  const ar = W / fullH;
+  const sunX = Math.cos(p.sunAz) * Math.cos(p.sunElev);
+  const sunY2 = Math.sin(p.sunElev);
+  const sunZ = Math.sin(p.sunAz) * Math.cos(p.sunElev);
+  const sunFactor = Math.max(0, sunY2);
+  const duskFactor = Math.max(0, 1 - sunY2 * 3);
+  const skyBase = lerpColor(pal.sky, [20, 25, 40], duskFactor * 0.7);
+  const horizonBase = lerpColor(pal.skyHorizon, lerpColor(pal.sunColor, [40, 30, 50], 0.5), duskFactor * 0.6);
+  const maxDist = 3000;
+  const camY = p.camAlt;
+
+  function terrainH(wx, wz) {
+    let hv = fbm(wx * p.scale * 0.002, wz * p.scale * 0.002, p.seed, 4, p.roughness);
+    const ridge = smoothNoise(wx * p.scale * 0.0015 + 50, wz * p.scale * 0.0015 + 50, p.seed + 100);
+    hv += Math.abs(ridge - 0.5) * 0.3;
+    return Math.max(0, hv) * p.height;
+  }
+
+  function cloudDen(wx, wz) {
+    const c = fbm(wx * 0.0008, wz * 0.0008, p.seed + 500, 3, 0.55);
+    return Math.max(0, (c - (1 - p.cloudCover)) / p.cloudCover);
+  }
+
+  for (let sy = 0; sy < h; sy++) {
+    const py = startRow + sy;
+    const ndy = (0.5 - py / fullH) * fov + p.lookDown * 0.5 - 0.15;
+
+    for (let px = 0; px < w; px++) {
+      const ndx = (px / W - 0.5) * fov * ar;
+      const rdx = ndx, rdy = ndy, rdz = 1;
+      const len = Math.sqrt(rdx*rdx + rdy*rdy + rdz*rdz);
+      const dx = rdx/len, dy = rdy/len, dz = rdz/len;
+      let r, g, b, hitDist = -1;
+
+      // March
+      let t = 2, hit = false, wx = 0, wy = 0, wz = 0;
+      for (let i = 0; i < 80 && t < maxDist; i++) {
+        wx = dx*t; wy = camY + dy*t; wz = dz*t;
+        if (wy < -10) break;
+        const th = terrainH(wx, wz);
+        const sh = Math.max(th, p.waterLevel);
+        if (wy <= sh) { hit = true; hitDist = t; break; }
+        const gap = wy - sh;
+        t += Math.max(4, Math.min(gap * 0.6, 40 + t * 0.06));
+      }
+
+      if (hit) {
+        const th = terrainH(wx, wz);
+        const isWater = th < p.waterLevel;
+        const eps = 3 + t * 0.02;
+        let nx, ny, nz;
+        if (isWater) {
+          nx = Math.sin(wx*0.05)*Math.cos(wz*0.03)*p.waveHeight*0.5;
+          ny = 1;
+          nz = Math.cos(wx*0.03)*Math.sin(wz*0.05)*p.waveHeight*0.5;
+        } else {
+          // Use 2-sample normal (cheaper than 4-sample)
+          const hC = th;
+          const hR = terrainH(wx+eps,wz);
+          const hD = terrainH(wx,wz+eps);
+          nx = hC - hR;
+          ny = eps;
+          nz = hC - hD;
+        }
+        const nl = Math.sqrt(nx*nx+ny*ny+nz*nz);
+        nx/=nl; ny/=nl; nz/=nl;
+
+        const diffuse = Math.max(0, nx*sunX + ny*sunY2 + nz*sunZ);
+        const ambient = 0.25 + sunFactor*0.1;
+        let light = ambient + diffuse*0.7;
+
+        let col;
+        if (isWater) {
+          const depth = (p.waterLevel-th)/Math.max(p.waterLevel,10);
+          col = lerpColor(pal.water, pal.waterDeep, Math.min(depth,1));
+          const hx=(sunX+0)/2, hy=(sunY2+1)/2, hz=(sunZ+0)/2;
+          const hl=Math.sqrt(hx*hx+hy*hy+hz*hz);
+          const spec=Math.pow(Math.max(0,nx*hx/hl+ny*hy/hl+nz*hz/hl),40);
+          light += spec*0.5*sunFactor;
+          col = lerpColor(col, skyBase, 0.15);
+        } else {
+          col = getTerrainColor(th, ny, pal, p.waterLevel, p.height);
+          if (ny < 0.7 && th > p.waterLevel+5) col = lerpColor(col, pal.rock, (0.7-ny)/0.3);
+        }
+
+        r = col[0]*light; g = col[1]*light; b = col[2]*light;
+        r = r*(1-duskFactor*0.3)+pal.sunColor[0]*diffuse*duskFactor*0.15;
+        g = g*(1-duskFactor*0.2)+pal.sunColor[1]*diffuse*duskFactor*0.1;
+        b = b*(1-duskFactor*0.1)+pal.sunColor[2]*diffuse*duskFactor*0.05;
+
+        const fogFactor = 1-Math.exp(-t*p.haze*0.001);
+        const fogCol = lerpColor(horizonBase,pal.sunColor,Math.max(0,dx*sunX+dz*sunZ)*0.15*sunFactor);
+        r = r*(1-fogFactor)+fogCol[0]*fogFactor;
+        g = g*(1-fogFactor)+fogCol[1]*fogFactor;
+        b = b*(1-fogFactor)+fogCol[2]*fogFactor;
+
+        // Cloud shadows
+        if (p.cloudCover > 0.01) {
+          const cd = cloudDen(wx,wz)*0.4;
+          if (cd > 0) { r*=(1-cd); g*=(1-cd); b*=(1-cd*0.8); }
+        }
+      } else {
+        hitDist = maxDist;
+      }
+
+      // Sky
+      if (hitDist < 0 || hitDist >= maxDist-1) {
+        const skyT = Math.max(0, dy*3);
+        const skyCol = lerpColor(horizonBase, skyBase, Math.min(skyT,1));
+        r = skyCol[0]; g = skyCol[1]; b = skyCol[2];
+        const sunDot = dx*sunX+dy*sunY2+dz*sunZ;
+        if (sunDot > 0.998) {
+          const si = Math.pow((sunDot-0.998)/0.002,0.5);
+          r+=(pal.sunColor[0]-r)*si; g+=(pal.sunColor[1]-g)*si; b+=(pal.sunColor[2]-b)*si;
+        }
+        if (sunDot > 0.95) {
+          const gi = Math.pow((sunDot-0.95)/0.05,2)*0.4;
+          r+=pal.sunColor[0]*gi*0.3; g+=pal.sunColor[1]*gi*0.25; b+=pal.sunColor[2]*gi*0.2;
+        }
+        if (p.cloudCover > 0.01 && dy > 0.001) {
+          const ct = (p.cloudHeight-camY)/dy;
+          if (ct > 0 && ct < maxDist*3) {
+            const cd = cloudDen(dx*ct, dz*ct);
+            if (cd > 0) {
+              const cl = 0.7+0.3*sunFactor;
+              const cc = [Math.min(255,240*cl),Math.min(255,240*cl),Math.min(255,245*cl)];
+              const a = Math.min(cd*1.5,0.95);
+              r=r*(1-a)+cc[0]*a; g=g*(1-a)+cc[1]*a; b=b*(1-a)+cc[2]*a;
+            }
+          }
+        }
+      }
+
+      const idx = (sy*w + px)*4;
+      targetPixels[idx] = Math.max(0,Math.min(255,r|0));
+      targetPixels[idx+1] = Math.max(0,Math.min(255,g|0));
+      targetPixels[idx+2] = Math.max(0,Math.min(255,b|0));
+      targetPixels[idx+3] = 255;
+    }
+  }
+}
+
+// === Controls ===
+const sliders = document.querySelectorAll('input[type="range"]');
+sliders.forEach(s => {
+  s.addEventListener('input', () => {
+    updateLabels();
+    scheduleRender();
+  });
+});
+
+function updateLabels() {
+  document.getElementById('vSeed').textContent = document.getElementById('seed').value;
+  document.getElementById('vHeight').textContent = (parseInt(document.getElementById('height').value) / 100).toFixed(2);
+  document.getElementById('vRough').textContent = (parseInt(document.getElementById('roughness').value) / 100).toFixed(2);
+  document.getElementById('vScale').textContent = (parseInt(document.getElementById('scale').value) / 100).toFixed(2);
+  document.getElementById('vWater').textContent = (parseInt(document.getElementById('water').value) / 100).toFixed(2);
+  document.getElementById('vWave').textContent = (parseInt(document.getElementById('wave').value) / 100).toFixed(2);
+  document.getElementById('vHaze').textContent = (parseInt(document.getElementById('haze').value) / 100).toFixed(2);
+  document.getElementById('vCloud').textContent = (parseInt(document.getElementById('cloud').value) / 100).toFixed(2);
+  document.getElementById('vCloudH').textContent = (parseInt(document.getElementById('cloudH').value) / 100).toFixed(2);
+  document.getElementById('vSunE').textContent = (parseInt(document.getElementById('sunElev').value) / 100).toFixed(2);
+  document.getElementById('vSunA').textContent = (parseInt(document.getElementById('sunAz').value) / 100).toFixed(2);
+  document.getElementById('vAlt').textContent = (parseInt(document.getElementById('altitude').value) / 100).toFixed(2);
+  document.getElementById('vLook').textContent = (parseInt(document.getElementById('lookDown').value) / 100).toFixed(2);
+  document.getElementById('vFov').textContent = (parseInt(document.getElementById('fov').value) / 100).toFixed(2);
+}
+
+function setPalette(idx, btn) {
+  currentPalette = idx;
+  document.querySelectorAll('.btn-row .btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  scheduleRender();
+}
+
+function randomize() {
+  document.getElementById('seed').value = 1 + Math.floor(Math.random() * 998);
+  document.getElementById('height').value = 20 + Math.floor(Math.random() * 70);
+  document.getElementById('roughness').value = 30 + Math.floor(Math.random() * 50);
+  document.getElementById('scale').value = 20 + Math.floor(Math.random() * 60);
+  document.getElementById('water').value = Math.floor(Math.random() * 60);
+  document.getElementById('haze').value = 10 + Math.floor(Math.random() * 60);
+  document.getElementById('cloud').value = Math.floor(Math.random() * 80);
+  document.getElementById('sunElev').value = 10 + Math.floor(Math.random() * 70);
+  document.getElementById('sunAz').value = Math.floor(Math.random() * 100);
+  currentPalette = Math.floor(Math.random() * palettes.length);
+  updateLabels();
+  scheduleRender();
+}
+
+// === Presets ===
+function loadPreset(name) {
+  const presets = {
+    alpine: { seed: 127, height: 75, roughness: 60, scale: 45, water: 20, wave: 20, haze: 35, cloud: 50, cloudH: 65, sunElev: 40, sunAz: 65, altitude: 35, lookDown: 12, fov: 60, palette: 0 },
+    desert: { seed: 314, height: 35, roughness: 40, scale: 70, water: 5, wave: 10, haze: 55, cloud: 10, cloudH: 70, sunElev: 65, sunAz: 30, altitude: 25, lookDown: 10, fov: 65, palette: 1 },
+    islands: { seed: 88, height: 45, roughness: 50, scale: 35, water: 40, wave: 45, haze: 30, cloud: 40, cloudH: 55, sunElev: 35, sunAz: 80, altitude: 40, lookDown: 18, fov: 55, palette: 0 },
+    arctic: { seed: 256, height: 50, roughness: 45, scale: 50, water: 15, wave: 15, haze: 50, cloud: 60, cloudH: 50, sunElev: 15, sunAz: 50, altitude: 30, lookDown: 10, fov: 60, palette: 2 },
+    canyon: { seed: 666, height: 85, roughness: 70, scale: 55, water: 8, wave: 10, haze: 25, cloud: 15, cloudH: 75, sunElev: 50, sunAz: 45, altitude: 20, lookDown: 20, fov: 70, palette: 1 },
+    volcanic: { seed: 451, height: 65, roughness: 55, scale: 40, water: 30, wave: 35, haze: 45, cloud: 35, cloudH: 45, sunElev: 20, sunAz: 85, altitude: 30, lookDown: 15, fov: 60, palette: 3 }
+  };
+  const p = presets[name];
+  if (!p) return;
+  for (const key in p) {
+    if (key === 'palette') { currentPalette = p[key]; continue; }
+    const el = document.getElementById(key);
+    if (el) el.value = p[key];
+  }
+  updateLabels();
+  scheduleRender();
+}
+
+function renderHQ() {
+  document.getElementById('status').textContent = 'Rendering Hi-Res...';
+  setTimeout(() => {
+    const scale = 2;
+    const hqCanvas = document.createElement('canvas');
+    hqCanvas.width = W * scale;
+    hqCanvas.height = H * scale;
+    const hqCtx = hqCanvas.getContext('2d');
+    const hqData = hqCtx.createImageData(W * scale, H * scale);
+    renderScene(W * scale, H * scale, hqData.data);
+    hqCtx.putImageData(hqData, 0, 0);
+    // Copy back to display
+    ctx.drawImage(hqCanvas, 0, 0, W, H);
+    document.getElementById('status').textContent = `Hi-Res ${W * scale}×${H * scale}`;
+  }, 50);
+}
+
+function exportImage() {
+  const link = document.createElement('a');
+  link.download = `landscape-${document.getElementById('seed').value}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// === Init ===
+resize();
+updateLabels();
+</script>
+</body>
+</html>

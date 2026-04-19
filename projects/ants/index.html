@@ -1,0 +1,2854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Ant Colony</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1410; color: #c8c0b0; font-family: system-ui; overflow: hidden; touch-action: none; }
+canvas { display: block; cursor: crosshair; }
+#ui {
+  position: fixed; top: 8px; left: 8px; z-index: 10;
+  background: rgba(20,16,12,0.92); border: 1px solid #3a3020;
+  border-radius: 10px; padding: 10px 14px; font-size: 0.8em;
+  backdrop-filter: blur(6px); min-width: 200px;
+  max-height: calc(100vh - 16px); overflow-y: auto;
+}
+#ui h2 { font-size: 1em; color: #d4a050; margin-bottom: 6px; font-weight: 400; letter-spacing: 1px; }
+#ui .row { display: flex; justify-content: space-between; margin: 2px 0; }
+#ui .label { color: #8a7a60; }
+#ui .val { color: #c8b890; }
+#controls { margin-top: 8px; display: flex; gap: 5px; flex-wrap: wrap; }
+#controls button {
+  background: #2a2418; border: 1px solid #4a3a28; color: #b0a080;
+  padding: 7px 11px; border-radius: 6px; cursor: pointer; font-size: 0.85em;
+  min-height: 36px; touch-action: manipulation;
+}
+#controls button:hover { border-color: #6a5a40; color: #d4c0a0; }
+#controls button.active { background: #3a3020; border-color: #7a6a48; color: #d4c0a0; }
+.help { color: #6a5a40; font-size: 0.7em; margin-top: 6px; line-height: 1.3; }
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 4px 0; color: #8a7a60; font-size: 0.85em;
+}
+.setting-row .setting-label { flex: 1; }
+.setting-row .setting-controls { display: flex; align-items: center; gap: 3px; }
+.setting-row button {
+  background: #2a2418; border: 1px solid #4a3a28; color: #b0a080;
+  width: 32px; height: 32px; border-radius: 6px; cursor: pointer;
+  font-size: 1.1em; display: flex; align-items: center; justify-content: center;
+  touch-action: manipulation;
+}
+.setting-row button:hover { border-color: #6a5a40; }
+.setting-row .setting-val { min-width: 32px; text-align: center; color: #c8b890; font-size: 0.9em; }
+#toggleUI {
+  position: fixed; top: 8px; right: 8px; z-index: 11;
+  background: rgba(20,16,12,0.85); border: 1px solid #3a3020;
+  color: #b0a080; width: 36px; height: 36px; border-radius: 8px;
+  cursor: pointer; font-size: 1.2em; display: flex; align-items: center;
+  justify-content: center; touch-action: manipulation;
+}
+.colony-legend { margin-top: 6px; font-size: 0.75em; }
+.colony-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.colony-row { margin: 2px 0; color: #8a7a60; display: flex; align-items: center; justify-content: space-between; }
+.colony-row .cname { display: flex; align-items: center; }
+.colony-info { display: flex; gap: 8px; font-size: 0.9em; }
+.section-header {
+  color: #7a6a50; font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px;
+  margin-top: 8px; margin-bottom: 3px; border-bottom: 1px solid #2a2418; padding-bottom: 2px;
+}
+.event-log {
+  max-height: 60px; overflow-y: auto; font-size: 0.7em; color: #6a5a40;
+  margin-top: 4px; line-height: 1.3;
+}
+.event-log .event { margin: 1px 0; }
+.event-log .combat { color: #c06040; }
+.event-log .birth { color: #60a060; }
+.event-log .death { color: #808080; }
+.event-log .predator { color: #a060a0; }
+.event-log .weather { color: #7090b0; }
+.time-indicator {
+  display: flex; align-items: center; gap: 6px; margin: 4px 0;
+  font-size: 0.85em; color: #8a7a60;
+}
+.time-indicator .time-icon { font-size: 1.1em; }
+.time-bar { flex: 1; height: 4px; background: #1a1410; border-radius: 2px; overflow: hidden; }
+.time-bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s linear; }
+</style>
+</head>
+<body>
+<button id="toggleUI" onclick="togglePanel()">&#9776;</button>
+<div id="ui">
+  <h2>Ant Colony</h2>
+  <div class="row"><span class="label">Ants</span><span class="val" id="antCount">0</span></div>
+  <div class="row"><span class="label">Food</span><span class="val" id="foodRemaining">0</span></div>
+  <div class="row"><span class="label">FPS</span><span class="val" id="fps">0</span></div>
+  <div id="colonyLegend" class="colony-legend"></div>
+  <div class="section-header">Settings</div>
+  <div>
+    <div class="setting-row">
+      <span class="setting-label">Ants/nest</span>
+      <div class="setting-controls">
+        <button onclick="adjustAnts(-50)">&minus;</button>
+        <span class="setting-val" id="valAnts">150</span>
+        <button onclick="adjustAnts(50)">+</button>
+      </div>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Trail life</span>
+      <div class="setting-controls">
+        <button onclick="adjustEvap(-1)">&minus;</button>
+        <span class="setting-val" id="valEvap">5</span>
+        <button onclick="adjustEvap(1)">+</button>
+      </div>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Speed</span>
+      <div class="setting-controls">
+        <button onclick="adjustSpeed(-1)">&minus;</button>
+        <span class="setting-val" id="valSpeed">1</span>
+        <button onclick="adjustSpeed(1)">+</button>
+      </div>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Brush</span>
+      <div class="setting-controls">
+        <button onclick="adjustBrush(-5)">&minus;</button>
+        <span class="setting-val" id="valBrush">15</span>
+        <button onclick="adjustBrush(5)">+</button>
+      </div>
+    </div>
+  </div>
+  <div id="controls">
+    <button onclick="setTool('food')" oncontextmenu="event.preventDefault();cycleFoodType()" id="btnFood" class="active" title="Right-click to change food type">Crumbs</button>
+    <button onclick="setTool('rock')" id="btnRock">Rock</button>
+    <button onclick="setTool('nest')" id="btnNest">Nest</button>
+    <button onclick="setTool('spider')" id="btnSpider">Spider</button>
+    <button onclick="setTool('beetle')" id="btnBeetle">Beetle</button>
+    <button onclick="setTool('erase')" id="btnErase">Erase</button>
+    <button onclick="resetSim()">Reset</button>
+  </div>
+  <div class="section-header">View</div>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">
+    <button onclick="setViewMode('normal')" id="viewNormal" style="background:#3a3020;border:1px solid #7a6a48;color:#d4c0a0;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Normal</button>
+    <button onclick="setViewMode('home')" id="viewHome" style="background:#2a2418;border:1px solid #4a3a28;color:#6080c0;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Home Ph</button>
+    <button onclick="setViewMode('food')" id="viewFood" style="background:#2a2418;border:1px solid #4a3a28;color:#60a060;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Food Ph</button>
+    <button onclick="setViewMode('wear')" id="viewWear" style="background:#2a2418;border:1px solid #4a3a28;color:#a09070;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Trails</button>
+  </div>
+  <div class="section-header">Scenarios</div>
+  <div id="scenarios" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">
+    <button onclick="scenarioBattle()" style="background:#2a2418;border:1px solid #4a3a28;color:#b0a080;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Battle</button>
+    <button onclick="scenarioSiege()" style="background:#2a2418;border:1px solid #4a3a28;color:#b0a080;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Siege</button>
+    <button onclick="scenarioGauntlet()" style="background:#2a2418;border:1px solid #4a3a28;color:#b0a080;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Gauntlet</button>
+    <button onclick="scenarioRoyale()" style="background:#2a2418;border:1px solid #4a3a28;color:#b0a080;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Royale</button>
+    <button onclick="scenarioNocturnal()" style="background:#2a2418;border:1px solid #4a3a28;color:#7090b0;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Nocturnal</button>
+    <button onclick="scenarioRegicide()" style="background:#2a2418;border:1px solid #4a3a28;color:#d4a050;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Regicide</button>
+    <button onclick="scenarioInvasion()" style="background:#2a2418;border:1px solid #4a3a28;color:#a07040;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Invasion</button>
+    <button onclick="scenarioMonsoon()" style="background:#2a2418;border:1px solid #4a3a28;color:#4080b0;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Monsoon</button>
+  </div>
+  <div class="section-header">Weather</div>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px">
+    <button onclick="triggerRain()" style="background:#2a2418;border:1px solid #4a3a28;color:#7090b0;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Rain</button>
+    <button onclick="triggerFoodDrop()" style="background:#2a2418;border:1px solid #4a3a28;color:#60a060;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Food Drop</button>
+    <button onclick="triggerQuake()" style="background:#2a2418;border:1px solid #4a3a28;color:#a08060;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:0.75em;min-height:32px;touch-action:manipulation">Quake</button>
+  </div>
+  <div class="section-header">Day/Night</div>
+  <div class="time-indicator">
+    <span class="time-icon" id="timeIcon">&#9728;</span>
+    <div class="time-bar"><div class="time-bar-fill" id="timeBar" style="width:50%;background:#d4a050"></div></div>
+    <span id="timeName" style="min-width:36px;text-align:right;color:#c8b890;font-size:0.8em">Day</span>
+  </div>
+  <div class="setting-row">
+    <span class="setting-label">Cycle</span>
+    <div class="setting-controls">
+      <button onclick="toggleDayNight()" id="btnDayNight" style="width:auto;padding:0 8px;font-size:0.8em">On</button>
+      <button onclick="adjustDaySpeed(-1)">&minus;</button>
+      <span class="setting-val" id="valDaySpeed">1</span>
+      <button onclick="adjustDaySpeed(1)">+</button>
+    </div>
+  </div>
+  <div class="section-header">Population</div>
+  <canvas id="popChart" width="180" height="50" style="width:100%;height:50px;border:1px solid #2a2418;border-radius:4px;margin-bottom:4px"></canvas>
+  <div class="section-header">Events</div>
+  <div id="eventLog" class="event-log"></div>
+  <div class="help">Tap/drag to place. Right-click Food to change type. Queens glow golden. Rain creates puddles that drown ants! Try Monsoon scenario.</div>
+  <button id="soundToggle" onclick="toggleSound()" style="margin-top:6px;background:#2a2418;border:1px solid #4a3a28;color:#6a5a40;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:0.75em;width:100%;touch-action:manipulation">Sound: Off</button>
+</div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H, GW, GH;
+const CELL = 2;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  GW = Math.ceil(W / CELL);
+  GH = Math.ceil(H / CELL);
+}
+resize();
+window.addEventListener('resize', () => { resize(); initGrids(); });
+
+// === ROLE SYSTEM ===
+// Scout: fast, explores far, finds new food sources, low combat
+// Worker: follows trails well, carries food efficiently, medium combat
+// Soldier: slower, patrols territory, strong combat, defends against enemies & spiders
+const ROLES = {
+  scout:   { speed: 1.8, wander: 1.2, trailFollow: 0.6, combat: 0.3, size: 1.0, spawnWeight: 2 },
+  worker:  { speed: 1.2, wander: 0.4, trailFollow: 1.0, combat: 0.5, size: 1.0, spawnWeight: 5 },
+  soldier: { speed: 1.0, wander: 0.7, trailFollow: 0.7, combat: 1.0, size: 1.5, spawnWeight: 2 },
+  queen:   { speed: 0.4, wander: 0.2, trailFollow: 0.3, combat: 0.2, size: 2.5, spawnWeight: 0 },
+};
+const ROLE_NAMES = ['scout', 'worker', 'soldier'];
+const ROLE_WEIGHTS_TOTAL = ROLES.scout.spawnWeight + ROLES.worker.spawnWeight + ROLES.soldier.spawnWeight;
+
+function pickRole() {
+  const r = Math.random() * ROLE_WEIGHTS_TOTAL;
+  if (r < ROLES.scout.spawnWeight) return 'scout';
+  if (r < ROLES.scout.spawnWeight + ROLES.worker.spawnWeight) return 'worker';
+  return 'soldier';
+}
+
+// === FOOD TYPES ===
+// 0=crumbs (green, value 1), 1=seeds (golden, value 2), 2=fruit (red, value 5, decays)
+const FOOD_TYPES = [
+  { name: 'crumbs', value: 1, color: [40, 180, 30], decayRate: 0 },
+  { name: 'seeds',  value: 2, color: [200, 170, 40], decayRate: 0 },
+  { name: 'fruit',  value: 5, color: [200, 50, 40],  decayRate: 0.001 }, // slowly rots
+];
+
+// === GRIDS ===
+let food, foodType, walls, alarmPh, trailWear, puddles; // alarm pheromone is global (all colonies react)
+
+function initGrids() {
+  const size = GW * GH;
+  food = new Float32Array(size);
+  foodType = new Uint8Array(size); // 0=crumbs, 1=seeds, 2=fruit
+  walls = new Uint8Array(size);
+  alarmPh = new Float32Array(size);
+  trailWear = new Float32Array(size); // permanent wear marks from ant traffic
+  puddles = new Float32Array(size); // water level 0-1, ants slow/drown
+  for (const nest of nests) {
+    nest.homePh = new Float32Array(size);
+    nest.foodPh = new Float32Array(size);
+    nest.tempHome = new Float32Array(size);
+    nest.tempFood = new Float32Array(size);
+  }
+}
+
+let ants = [];
+let nests = [];
+let spiders = [];
+let beetles = [];
+let particles = [];
+let nestIdCounter = 0;
+let totalFood = 0;
+let simTick = 0;
+
+// Event log
+const events = [];
+const MAX_EVENTS = 20;
+
+function logEvent(type, text) {
+  events.unshift({ type, text, tick: simTick });
+  if (events.length > MAX_EVENTS) events.pop();
+}
+
+function renderEventLog() {
+  const el = document.getElementById('eventLog');
+  el.innerHTML = events.slice(0, 8).map(e =>
+    `<div class="event ${e.type}">${e.text}</div>`
+  ).join('');
+}
+
+// Colony colours
+const COLONY_COLOURS = [
+  { name: 'Amber',   body: '#8a6020', carry: '#d4a030', scout: '#c8a848', soldier: '#b08828', queen: '#ffe080', trail: [220, 160, 40],  home: [60, 80, 200],  mound: 'rgba(140,100,30,' },
+  { name: 'Crimson', body: '#802525', carry: '#d04040', scout: '#c84848', soldier: '#a03030', queen: '#ff8080', trail: [220, 60, 60],   home: [60, 200, 100],  mound: 'rgba(140,40,40,' },
+  { name: 'Teal',    body: '#206860', carry: '#40b8a8', scout: '#50c8b0', soldier: '#309080', queen: '#80ffe0', trail: [50, 200, 180],  home: [200, 100, 60],  mound: 'rgba(40,120,100,' },
+  { name: 'Violet',  body: '#604080', carry: '#a070d0', scout: '#b080e0', soldier: '#805098', queen: '#d0a0ff', trail: [160, 90, 220],  home: [100, 200, 60],  mound: 'rgba(90,60,130,' },
+  { name: 'Silver',  body: '#606868', carry: '#a0b0b0', scout: '#b0c0c0', soldier: '#788080', queen: '#e0e8f0', trail: [160, 180, 190], home: [190, 160, 80],  mound: 'rgba(90,100,100,' },
+  { name: 'Jade',    body: '#307030', carry: '#60c060', scout: '#70d070', soldier: '#408840', queen: '#80ff80', trail: [80, 200, 80],   home: [200, 80, 160],  mound: 'rgba(50,110,50,' },
+];
+
+// Settings
+let numAntsPerNest = 150;
+let evapRate = 0.995;
+let evapLevel = 5;
+let diffusionRate = 0.20;
+let brushRadius = 15;
+let tool = 'food';
+let simSpeed = 1;
+let foodRegrowth = true;
+let currentFoodType = 0; // 0=crumbs, 1=seeds, 2=fruit
+let viewMode = 'normal'; // normal, home, food, wear
+
+// === DAY/NIGHT CYCLE ===
+let dayTime = 0.35; // 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
+let dayNightEnabled = true;
+let daySpeed = 1; // 1=normal (~4min/cycle), higher=faster
+const DAY_CYCLE_RATE = 1 / (60 * 60 * 4); // full cycle in ~4 minutes at 60fps
+
+// Pre-generate stars
+const stars = [];
+for (let i = 0; i < 60; i++) {
+  stars.push({
+    x: Math.random(),
+    y: Math.random() * 0.4, // top portion of screen
+    size: 0.5 + Math.random() * 1.5,
+    twinkle: Math.random() * Math.PI * 2,
+    speed: 0.5 + Math.random() * 2,
+  });
+}
+
+function getDayPhase() {
+  // Returns: { phase, brightness, skyR, skyG, skyB, groundR, groundG, groundB, nightAmount }
+  const t = dayTime;
+  let phase, brightness, nightAmount;
+  let skyR, skyG, skyB, groundR, groundG, groundB;
+
+  if (t < 0.2) {
+    // Night (midnight to pre-dawn)
+    phase = 'Night';
+    nightAmount = 1;
+    brightness = 0.3;
+    skyR = 8; skyG = 10; skyB = 22;
+    groundR = 12; groundG = 10; groundB = 16;
+  } else if (t < 0.3) {
+    // Dawn transition
+    const p = (t - 0.2) / 0.1;
+    phase = 'Dawn';
+    nightAmount = 1 - p;
+    brightness = 0.3 + p * 0.7;
+    skyR = 8 + p * 60; skyG = 10 + p * 30; skyB = 22 + p * 10;
+    groundR = 12 + p * 14; groundG = 10 + p * 10; groundB = 16 - p * 6;
+  } else if (t < 0.7) {
+    // Day
+    phase = 'Day';
+    nightAmount = 0;
+    brightness = 1;
+    skyR = 68; skyG = 40; skyB = 32;
+    groundR = 26; groundG = 20; groundB = 16;
+  } else if (t < 0.8) {
+    // Dusk transition
+    const p = (t - 0.7) / 0.1;
+    phase = 'Dusk';
+    nightAmount = p;
+    brightness = 1 - p * 0.7;
+    skyR = 68 - p * 20; skyG = 40 - p * 15; skyB = 32 + p * 15;
+    groundR = 26 - p * 14; groundG = 20 - p * 10; groundB = 16 + p * 0;
+  } else {
+    // Night (dusk to midnight)
+    phase = 'Night';
+    nightAmount = 1;
+    brightness = 0.3;
+    skyR = 8; skyG = 10; skyB = 22;
+    groundR = 12; groundG = 10; groundB = 16;
+  }
+
+  return { phase, brightness, nightAmount, skyR, skyG, skyB, groundR, groundG, groundB };
+}
+
+function toggleDayNight() {
+  dayNightEnabled = !dayNightEnabled;
+  document.getElementById('btnDayNight').textContent = dayNightEnabled ? 'On' : 'Off';
+  document.getElementById('btnDayNight').style.color = dayNightEnabled ? '#b0a080' : '#6a5a40';
+}
+
+function adjustDaySpeed(delta) {
+  daySpeed = Math.max(1, Math.min(5, daySpeed + delta));
+  document.getElementById('valDaySpeed').textContent = daySpeed;
+}
+
+// Population dynamics
+const ANT_MAX_AGE = 3000; // ticks before natural death
+const BIRTH_INTERVAL = 30; // ticks between potential births per nest
+const BIRTH_FOOD_COST = 3; // food collected needed per birth
+
+const EVAP_MAP = [0.980, 0.985, 0.990, 0.993, 0.995, 0.996, 0.997, 0.998, 0.999];
+
+// === ANT CREATION ===
+function createAnt(nx, ny, nestId, role) {
+  const r = ROLES[role];
+  return {
+    x: nx + (Math.random() - 0.5) * 10,
+    y: ny + (Math.random() - 0.5) * 10,
+    angle: Math.random() * Math.PI * 2,
+    hasFood: false,
+    speed: r.speed * (0.9 + Math.random() * 0.2),
+    turnBias: (Math.random() - 0.5) * 0.3,
+    life: 0,
+    age: 0,
+    nestId: nestId,
+    role: role,
+    combat: r.combat * (0.8 + Math.random() * 0.4),
+    hp: role === 'queen' ? 8 : role === 'soldier' ? 2 : 1,
+    cooldown: 0,
+    foodValue: 1,
+    founding: false, // queen founding a new colony
+    foundingTarget: null, // {x,y} where to found
+  };
+}
+
+function addNestAt(px, py) {
+  const id = nestIdCounter++;
+  const colourIdx = id % COLONY_COLOURS.length;
+  const size = GW * GH;
+  const nest = {
+    x: px, y: py, id: id,
+    colour: COLONY_COLOURS[colourIdx],
+    colourIdx: colourIdx,
+    foodCollected: 0,
+    foodBank: 0,
+    totalBorn: 0,
+    totalDied: 0,
+    kills: 0,
+    homePh: new Float32Array(size),
+    foodPh: new Float32Array(size),
+    tempHome: new Float32Array(size),
+    tempFood: new Float32Array(size),
+    birthTimer: 0,
+    queenless: false, // true when queen is killed
+    queenlessTick: 0,  // tick when queen was lost
+  };
+  nests.push(nest);
+  nestMap.set(id, nest);
+  // Create queen first
+  const queen = createAnt(px, py, id, 'queen');
+  queen.x = px + (Math.random() - 0.5) * 4;
+  queen.y = py + (Math.random() - 0.5) * 4;
+  ants.push(queen);
+  // Then workers/scouts/soldiers
+  for (let i = 0; i < numAntsPerNest; i++) {
+    ants.push(createAnt(px, py, id, pickRole()));
+  }
+  updateLegend();
+  return id;
+}
+
+// Fast nest lookup via Map
+const nestMap = new Map();
+function getNest(id) {
+  return nestMap.get(id);
+}
+
+function idx(gx, gy) { return gy * GW + gx; }
+function inBounds(gx, gy) { return gx >= 0 && gx < GW && gy >= 0 && gy < GH; }
+function toGrid(px) { return Math.floor(px / CELL); }
+
+// === SPIDER (PREDATOR) ===
+function createSpider(px, py) {
+  return {
+    x: px, y: py,
+    angle: Math.random() * Math.PI * 2,
+    webRadius: 30 + Math.random() * 15,
+    killCount: 0,
+    moveTimer: 0,
+    lungeTarget: null,
+    lungeTimer: 0,
+    bodySize: 4,
+  };
+}
+
+function updateSpider(spider) {
+  spider.moveTimer++;
+
+  // Lunge animation
+  if (spider.lungeTarget) {
+    spider.lungeTimer++;
+    if (spider.lungeTimer > 10) {
+      spider.lungeTarget = null;
+      spider.lungeTimer = 0;
+    }
+    return;
+  }
+
+  // Occasionally shift position slightly — more active at night
+  const moveThreshold = cachedNightAmount > 0.5 ? 100 + Math.random() * 100 : 300 + Math.random() * 200;
+  if (spider.moveTimer > moveThreshold) {
+    spider.x += (Math.random() - 0.5) * 8;
+    spider.y += (Math.random() - 0.5) * 8;
+    spider.x = Math.max(10, Math.min(W - 10, spider.x));
+    spider.y = Math.max(10, Math.min(H - 10, spider.y));
+    spider.moveTimer = 0;
+  }
+
+  // Hunt nearby ants (use spatial hash if available)
+  const webR2 = spider.webRadius * spider.webRadius;
+  const killR2 = (spider.webRadius * 0.6) * (spider.webRadius * 0.6);
+
+  const nearbyAnts = spatialHash.size > 0
+    ? getNearbyAnts(spider.x, spider.y, spider.webRadius)
+    : Array.from({length: ants.length}, (_, i) => i);
+
+  for (let ni = nearbyAnts.length - 1; ni >= 0; ni--) {
+    const i = nearbyAnts[ni];
+    const ant = ants[i];
+    if (!ant) continue;
+    const dx = ant.x - spider.x;
+    const dy = ant.y - spider.y;
+    const d2 = dx * dx + dy * dy;
+
+    if (d2 < webR2) {
+      // Ants in web slow down
+      ant.speed *= 0.95;
+
+      // Soldiers can fight spiders!
+      if (ant.role === 'soldier' && d2 < killR2 && ant.cooldown <= 0) {
+        // Soldier damages spider — takes a few hits
+        spider.bodySize -= 0.3;
+        ant.cooldown = 20;
+        spawnParticle(ant.x, ant.y, 'combat');
+
+        if (spider.bodySize <= 1.5) {
+          // Spider killed!
+          const si = spiders.indexOf(spider);
+          if (si >= 0) spiders.splice(si, 1);
+          const nest = getNest(ant.nestId);
+          if (nest) {
+            logEvent('combat', `${nest.colour.name} soldier killed a spider!`);
+          }
+          return;
+        }
+      }
+
+      if (d2 < killR2 && ant.role !== 'soldier') {
+        // Queens take damage but aren't instant-killed
+        if (ant.role === 'queen') {
+          ant.hp--;
+          spider.lungeTarget = { x: ant.x, y: ant.y };
+          spider.lungeTimer = 0;
+          spider.angle = Math.atan2(dy, dx);
+          spawnParticle(ant.x, ant.y, 'queen');
+          if (ant.hp <= 0) {
+            killAnt(i, 'predator');
+            spider.killCount++;
+          }
+          playSpiderSound();
+          break;
+        }
+        // Kill the ant
+        spider.lungeTarget = { x: ant.x, y: ant.y };
+        spider.lungeTimer = 0;
+        spider.angle = Math.atan2(dy, dx);
+        killAnt(i, 'predator');
+        playSpiderSound();
+        spider.killCount++;
+        if (spider.killCount % 5 === 0) {
+          logEvent('predator', `Spider caught ${spider.killCount} ants`);
+        }
+        // Release alarm pheromone
+        const gx = toGrid(ant.x), gy = toGrid(ant.y);
+        if (inBounds(gx, gy)) {
+          const alarmR = 8;
+          for (let ay = -alarmR; ay <= alarmR; ay++) {
+            for (let ax = -alarmR; ax <= alarmR; ax++) {
+              const agx = gx + ax, agy = gy + ay;
+              if (inBounds(agx, agy) && ax*ax + ay*ay <= alarmR*alarmR) {
+                alarmPh[idx(agx, agy)] = Math.min(255, alarmPh[idx(agx, agy)] + 100);
+              }
+            }
+          }
+        }
+        break; // one kill per tick
+      }
+    }
+  }
+}
+
+// === BEETLE (GROUND PREDATOR) ===
+// Beetles walk toward nearest nest, eat ants in path, target the queen
+function createBeetle(px, py) {
+  return {
+    x: px, y: py,
+    angle: Math.random() * Math.PI * 2,
+    speed: 0.6 + Math.random() * 0.3,
+    hp: 15, // very tanky
+    maxHp: 15,
+    killCount: 0,
+    attackTimer: 0,
+    targetNest: null,
+    bodySize: 6,
+    mandibleAnim: 0, // animation timer for mandibles
+  };
+}
+
+function updateBeetle(beetle) {
+  beetle.mandibleAnim = (beetle.mandibleAnim + 0.05) % (Math.PI * 2);
+
+  // Find nearest nest to walk toward
+  if (!beetle.targetNest || Math.random() < 0.005) {
+    let minDist = Infinity;
+    for (const nest of nests) {
+      const dx = nest.x - beetle.x;
+      const dy = nest.y - beetle.y;
+      const d = dx * dx + dy * dy;
+      if (d < minDist) { minDist = d; beetle.targetNest = nest; }
+    }
+  }
+
+  // Walk toward target nest
+  if (beetle.targetNest) {
+    const dx = beetle.targetNest.x - beetle.x;
+    const dy = beetle.targetNest.y - beetle.y;
+    const targetAngle = Math.atan2(dy, dx);
+    // Gradually turn toward target
+    let angleDiff = targetAngle - beetle.angle;
+    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+    beetle.angle += angleDiff * 0.05 + (Math.random() - 0.5) * 0.1;
+  }
+
+  const spd = beetle.speed * cachedDaySpeedMod;
+  const nx = beetle.x + Math.cos(beetle.angle) * spd;
+  const ny = beetle.y + Math.sin(beetle.angle) * spd;
+  const gx = toGrid(nx), gy = toGrid(ny);
+  if (inBounds(gx, gy) && !walls[idx(gx, gy)]) {
+    beetle.x = nx;
+    beetle.y = ny;
+  } else {
+    beetle.angle += Math.PI * 0.5 + Math.random() * Math.PI;
+  }
+  beetle.x = Math.max(10, Math.min(W - 10, beetle.x));
+  beetle.y = Math.max(10, Math.min(H - 10, beetle.y));
+
+  // Attack ants in range
+  beetle.attackTimer++;
+  if (beetle.attackTimer < 8) return; // attack cooldown
+  beetle.attackTimer = 0;
+
+  const attackR = 12;
+  const attackR2 = attackR * attackR;
+  const nearbyAnts = spatialHash.size > 0
+    ? getNearbyAnts(beetle.x, beetle.y, attackR)
+    : [];
+
+  for (let ni = nearbyAnts.length - 1; ni >= 0; ni--) {
+    const i = nearbyAnts[ni];
+    const ant = ants[i];
+    if (!ant) continue;
+    const adx = ant.x - beetle.x;
+    const ady = ant.y - beetle.y;
+    if (adx * adx + ady * ady > attackR2) continue;
+
+    // Soldiers fight back — damage the beetle
+    if (ant.role === 'soldier') {
+      beetle.hp -= 0.5;
+      ant.cooldown = 20;
+      spawnParticle((ant.x + beetle.x) / 2, (ant.y + beetle.y) / 2, 'combat');
+      if (beetle.hp <= 0) {
+        const bi = beetles.indexOf(beetle);
+        if (bi >= 0) beetles.splice(bi, 1);
+        const nest = getNest(ant.nestId);
+        if (nest) logEvent('combat', `${nest.colour.name} soldiers killed a beetle!`);
+        return;
+      }
+      break; // one interaction per tick
+    }
+
+    // Kill non-soldier ants (queens take damage)
+    if (ant.role === 'queen') {
+      ant.hp -= 2; // beetles hit queens hard
+      spawnParticle(ant.x, ant.y, 'queen');
+      if (ant.hp <= 0) {
+        killAnt(i, 'predator');
+        beetle.killCount++;
+        logEvent('predator', `Beetle killed a queen!`);
+      }
+    } else {
+      killAnt(i, 'predator');
+      beetle.killCount++;
+    }
+    // Release alarm pheromone
+    if (inBounds(gx, gy)) {
+      const alarmR = 10;
+      for (let ay = -alarmR; ay <= alarmR; ay++) {
+        for (let ax = -alarmR; ax <= alarmR; ax++) {
+          const agx = gx + ax, agy = gy + ay;
+          if (inBounds(agx, agy) && ax*ax + ay*ay <= alarmR*alarmR) {
+            alarmPh[idx(agx, agy)] = Math.min(255, alarmPh[idx(agx, agy)] + 120);
+          }
+        }
+      }
+    }
+    break; // one kill per tick
+  }
+}
+
+function killAnt(index, cause) {
+  const ant = ants[index];
+  const nest = getNest(ant.nestId);
+  if (nest) nest.totalDied++;
+
+  // Queen death — colony becomes queenless
+  if (ant.role === 'queen' && nest && !ant.founding) {
+    nest.queenless = true;
+    nest.queenlessTick = simTick;
+    logEvent('death', `${nest.colour.name} queen killed! Colony is dying...`);
+    // Big particle burst for queen death
+    for (let p = 0; p < 12; p++) {
+      particles.push({
+        x: ant.x, y: ant.y,
+        vx: (Math.random() - 0.5) * 5,
+        vy: (Math.random() - 0.5) * 5,
+        life: 30 + Math.random() * 20,
+        maxLife: 50,
+        type: 'queen',
+      });
+    }
+    if (soundEnabled) playQueenDeathSound();
+  }
+
+  // Drop food if carrying
+  if (ant.hasFood) {
+    const gx = toGrid(ant.x), gy = toGrid(ant.y);
+    if (inBounds(gx, gy) && !walls[idx(gx, gy)]) {
+      food[idx(gx, gy)] += 2;
+      totalFood++;
+    }
+  }
+
+  spawnParticle(ant.x, ant.y, cause === 'combat' ? 'combat' : cause === 'predator' ? 'predator' : 'death');
+  ants.splice(index, 1);
+}
+
+// === PARTICLES ===
+function spawnParticle(x, y, type) {
+  const count = type === 'combat' ? 5 : type === 'predator' ? 4 : 2;
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 3,
+      vy: (Math.random() - 0.5) * 3,
+      life: 20 + Math.random() * 15,
+      maxLife: 35,
+      type,
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.92;
+    p.vy *= 0.92;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+// === SPATIAL HASH FOR COMBAT ===
+const HASH_CELL = 20; // pixels per hash cell
+let spatialHash = new Map();
+
+function buildSpatialHash() {
+  spatialHash.clear();
+  for (let i = 0; i < ants.length; i++) {
+    const a = ants[i];
+    const key = (Math.floor(a.x / HASH_CELL) << 16) | (Math.floor(a.y / HASH_CELL) & 0xFFFF);
+    let bucket = spatialHash.get(key);
+    if (!bucket) { bucket = []; spatialHash.set(key, bucket); }
+    bucket.push(i);
+  }
+}
+
+function getNearbyAnts(x, y, radius) {
+  const result = [];
+  const minCX = Math.floor((x - radius) / HASH_CELL);
+  const maxCX = Math.floor((x + radius) / HASH_CELL);
+  const minCY = Math.floor((y - radius) / HASH_CELL);
+  const maxCY = Math.floor((y + radius) / HASH_CELL);
+  for (let cx = minCX; cx <= maxCX; cx++) {
+    for (let cy = minCY; cy <= maxCY; cy++) {
+      const key = (cx << 16) | (cy & 0xFFFF);
+      const bucket = spatialHash.get(key);
+      if (bucket) {
+        for (const idx of bucket) result.push(idx);
+      }
+    }
+  }
+  return result;
+}
+
+// === COLONY COMBAT ===
+function checkCombat(ant, antIndex) {
+  if (ant.cooldown > 0) { ant.cooldown--; return; }
+
+  const isSoldier = ant.role === 'soldier';
+  const gx = toGrid(ant.x), gy = toGrid(ant.y);
+  const hasAlarm = inBounds(gx, gy) && alarmPh[idx(gx, gy)] > 5;
+
+  if (!isSoldier && !hasAlarm) return;
+
+  const searchR = isSoldier ? 15 : 8;
+  const searchR2 = searchR * searchR;
+
+  const nearby = getNearbyAnts(ant.x, ant.y, searchR);
+  // Soldiers prioritize attacking queens
+  let targetIdx = -1;
+  for (const i of nearby) {
+    if (i === antIndex) continue;
+    const other = ants[i];
+    if (!other || other.nestId === ant.nestId) continue;
+    const dx = other.x - ant.x;
+    const dy = other.y - ant.y;
+    if (dx * dx + dy * dy > searchR2) continue;
+    if (other.role === 'queen' && isSoldier) { targetIdx = i; break; } // prioritize queen
+    if (targetIdx < 0) targetIdx = i;
+  }
+  if (targetIdx >= 0) {
+    const i = targetIdx;
+    const other = ants[i];
+
+    const dx = other.x - ant.x;
+    const dy = other.y - ant.y;
+
+    const myPower = ant.combat * (0.7 + Math.random() * 0.6);
+    const theirPower = other.combat * (0.7 + Math.random() * 0.6);
+
+    ant.cooldown = 15;
+    other.cooldown = 15;
+    spawnParticle((ant.x + other.x) / 2, (ant.y + other.y) / 2, 'combat');
+    playCombatSound();
+
+    if (myPower >= theirPower) {
+      other.hp--;
+      if (other.hp <= 0) {
+        const myNest = getNest(ant.nestId);
+        const theirNest = getNest(other.nestId);
+        if (myNest) myNest.kills++;
+        killAnt(i, 'combat');
+        if (antIndex > i) antIndex--;
+
+        if (myNest && theirNest && Math.random() < 0.1) {
+          logEvent('combat', `${myNest.colour.name} ${ant.role} defeated ${theirNest.colour.name} ${other.role}`);
+        }
+      }
+    } else {
+      ant.hp--;
+      if (ant.hp <= 0) {
+        const myNest = getNest(ant.nestId);
+        const theirNest = getNest(other.nestId);
+        if (theirNest) theirNest.kills++;
+        killAnt(antIndex, 'combat');
+
+        if (myNest && theirNest && Math.random() < 0.1) {
+          logEvent('combat', `${theirNest.colour.name} ${other.role} defeated ${myNest.colour.name} ${ant.role}`);
+        }
+        return;
+      }
+    }
+  }
+}
+
+// === SENSING ===
+function sense(ant, pheromoneGrid, angleOffset, dist) {
+  const a = ant.angle + angleOffset;
+  const sx = toGrid(ant.x + Math.cos(a) * dist);
+  const sy = toGrid(ant.y + Math.sin(a) * dist);
+  if (!inBounds(sx, sy) || walls[idx(sx, sy)]) return 0;
+  return pheromoneGrid[idx(sx, sy)];
+}
+
+function senseAlarm(ant, angleOffset, dist) {
+  const a = ant.angle + angleOffset;
+  const sx = toGrid(ant.x + Math.cos(a) * dist);
+  const sy = toGrid(ant.y + Math.sin(a) * dist);
+  if (!inBounds(sx, sy)) return 0;
+  return alarmPh[idx(sx, sy)];
+}
+
+// === ANT UPDATE ===
+function updateAnt(ant, antIndex) {
+  ant.life++;
+  ant.age++;
+  const nest = getNest(ant.nestId);
+  if (!nest) return;
+
+  const roleStats = ROLES[ant.role];
+
+  // Queens don't die of old age (unless founding queen lost in transit)
+  // Other ants: natural death by age
+  if (ant.role !== 'queen' && ant.age > ANT_MAX_AGE + Math.random() * 500) {
+    killAnt(antIndex, 'age');
+    return false;
+  }
+
+  // === QUEEN BEHAVIOR ===
+  if (ant.role === 'queen') {
+    // Founding queen — walks to target location
+    if (ant.founding && ant.foundingTarget) {
+      const dx = ant.foundingTarget.x - ant.x;
+      const dy = ant.foundingTarget.y - ant.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 15) {
+        // Arrived — found new colony
+        ant.founding = false;
+        const oldNestId = ant.nestId;
+        const oldNest = getNest(oldNestId);
+        // Remove queen from old colony ant list (she'll be in the new one)
+        ants.splice(antIndex, 1);
+        const newId = addNestAt(ant.foundingTarget.x, ant.foundingTarget.y);
+        if (oldNest) logEvent('birth', `${oldNest.colour.name} queen founded new colony!`);
+        return false;
+      }
+      // Walk toward target
+      ant.angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.2;
+      const spd = ant.speed * cachedDaySpeedMod;
+      ant.x += Math.cos(ant.angle) * spd;
+      ant.y += Math.sin(ant.angle) * spd;
+      ant.x = Math.max(5, Math.min(W - 5, ant.x));
+      ant.y = Math.max(5, Math.min(H - 5, ant.y));
+      return true;
+    }
+
+    // Resident queen — stay near nest, wander slowly in small circle
+    const dx = ant.x - nest.x;
+    const dy = ant.y - nest.y;
+    const distFromNest = Math.sqrt(dx * dx + dy * dy);
+    if (distFromNest > 20) {
+      // Drift back toward nest
+      ant.angle = Math.atan2(-dy, -dx) + (Math.random() - 0.5) * 0.5;
+    } else {
+      ant.angle += (Math.random() - 0.5) * 0.6;
+    }
+    const qspd = ant.speed * 0.5 * cachedDaySpeedMod;
+    const nx = ant.x + Math.cos(ant.angle) * qspd;
+    const ny = ant.y + Math.sin(ant.angle) * qspd;
+    const gx = toGrid(nx), gy = toGrid(ny);
+    if (inBounds(gx, gy) && !walls[idx(gx, gy)]) {
+      ant.x = nx; ant.y = ny;
+    }
+    // Queens don't forage, deposit, or fight — they just exist
+    return true;
+  }
+
+  // Soldiers respond to alarm pheromone — move toward it
+  if (ant.role === 'soldier' && !ant.hasFood) {
+    const aL = senseAlarm(ant, -0.5, 14);
+    const aC = senseAlarm(ant, 0, 14);
+    const aR = senseAlarm(ant, 0.5, 14);
+    const alarmTotal = aL + aC + aR;
+    if (alarmTotal > 2) {
+      // Steer toward alarm
+      if (aL > aC && aL > aR) ant.angle -= 0.4;
+      else if (aR > aC && aR > aL) ant.angle += 0.4;
+      // Move faster toward alarm
+      const nx = ant.x + Math.cos(ant.angle) * ant.speed * 1.3;
+      const ny = ant.y + Math.sin(ant.angle) * ant.speed * 1.3;
+      const gx = toGrid(nx), gy = toGrid(ny);
+      if (inBounds(gx, gy) && !walls[idx(gx, gy)]) {
+        ant.x = nx; ant.y = ny;
+      }
+      checkCombat(ant, antIndex);
+      return true;
+    }
+  }
+
+  // Follow own colony's pheromones
+  const target = ant.hasFood ? nest.homePh : nest.foodPh;
+  const senseDist = ant.role === 'scout' ? 16 : 12;
+
+  const sL = sense(ant, target, -0.5, senseDist) * roleStats.trailFollow;
+  const sC = sense(ant, target, 0, senseDist) * roleStats.trailFollow;
+  const sR = sense(ant, target, 0.5, senseDist) * roleStats.trailFollow;
+
+  const wanderAmount = roleStats.wander;
+  if (sC >= sL && sC >= sR) {
+    ant.angle += (Math.random() - 0.5) * 0.3 * wanderAmount + ant.turnBias * 0.1;
+  } else if (sL > sR) {
+    ant.angle -= 0.3 + Math.random() * 0.2;
+  } else {
+    ant.angle += 0.3 + Math.random() * 0.2;
+  }
+
+  if (sL + sC + sR < 0.01) {
+    ant.angle += (Math.random() - 0.5) * 0.8 * wanderAmount;
+  }
+
+  // Highway effect — strong trails boost speed
+  const trailStrength = sL + sC + sR;
+  const highwayBoost = trailStrength > 50 ? 1.3 : trailStrength > 20 ? 1.15 : 1.0;
+  // Day/night speed modifier — ants slower at night (use cached value)
+  const currentSpeed = ant.speed * highwayBoost * cachedDaySpeedMod;
+
+  const nx = ant.x + Math.cos(ant.angle) * currentSpeed;
+  const ny = ant.y + Math.sin(ant.angle) * currentSpeed;
+  const gx = toGrid(nx);
+  const gy = toGrid(ny);
+
+  if (!inBounds(gx, gy) || walls[idx(gx, gy)]) {
+    ant.angle += Math.PI * (0.5 + Math.random());
+    return true;
+  }
+
+  const ci = idx(gx, gy);
+  const waterLevel = puddles[ci];
+
+  // Puddle interaction: ants try to avoid, slow in shallow, drown in deep
+  if (waterLevel > 0.1) {
+    if (waterLevel > 0.7 && Math.random() < 0.03 * waterLevel) {
+      // Drown in deep water
+      spawnParticle(ant.x, ant.y, 'death');
+      logEvent('weather', `An ant drowned in a puddle`);
+      return false;
+    }
+    // Ants try to steer away from deeper water
+    if (waterLevel > 0.3 && Math.random() < 0.4) {
+      ant.angle += (Math.random() - 0.5) * Math.PI;
+      return true;
+    }
+  }
+
+  ant.x = nx;
+  ant.y = ny;
+  const i = ci;
+
+  // Deposit pheromone
+  const deposit = Math.max(0.5, 5 - ant.life * 0.002);
+  if (ant.hasFood) {
+    nest.foodPh[i] = Math.min(255, nest.foodPh[i] + deposit);
+  } else {
+    nest.homePh[i] = Math.min(255, nest.homePh[i] + deposit);
+  }
+  // Accumulate trail wear (permanent ground marks)
+  trailWear[i] = Math.min(40, trailWear[i] + 0.02);
+
+  // Pick up food — workers are better at it
+  if (!ant.hasFood && food[i] > 0) {
+    // Soldiers don't pick up food (they patrol)
+    if (ant.role !== 'soldier') {
+      ant.hasFood = true;
+      ant.foodValue = FOOD_TYPES[foodType[i]].value * (ant.role === 'worker' ? 1.5 : 1);
+      const takeAmount = ant.role === 'worker' ? 1.5 : 1;
+      food[i] = Math.max(0, food[i] - takeAmount);
+      ant.angle += Math.PI;
+      ant.life = 0;
+      if (food[i] <= 0) totalFood--;
+      playFoodSound();
+      // Sparkle matching food type
+      const sparkleType = foodType[i] === 2 ? 'fruit' : foodType[i] === 1 ? 'seeds' : 'food';
+      for (let sp = 0; sp < 3; sp++) {
+        particles.push({
+          x: ant.x, y: ant.y,
+          vx: (Math.random() - 0.5) * 2,
+          vy: (Math.random() - 0.5) * 2 - 1,
+          life: 12 + Math.random() * 8,
+          maxLife: 20,
+          type: sparkleType,
+        });
+      }
+    }
+  }
+
+  // Return to own nest
+  if (ant.hasFood) {
+    const dx = ant.x - nest.x;
+    const dy = ant.y - nest.y;
+    if (dx * dx + dy * dy < 400) {
+      ant.hasFood = false;
+      const foodValue = ant.foodValue || 1;
+      nest.foodCollected += foodValue;
+      nest.foodBank += foodValue;
+      ant.angle += Math.PI;
+      ant.life = 0;
+      // Gold sparkle on delivery
+      particles.push({
+        x: nest.x + (Math.random() - 0.5) * 6,
+        y: nest.y + (Math.random() - 0.5) * 6,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: -Math.random() * 2,
+        life: 15, maxLife: 15, type: 'deliver',
+      });
+    }
+  }
+
+  // Combat check for soldiers (and alarmed ants)
+  if (nests.length > 1) {
+    checkCombat(ant, antIndex);
+  }
+
+  return true;
+}
+
+// === POPULATION DYNAMICS ===
+const QUEEN_FOUNDING_FOOD = 200; // food threshold to produce a founding queen
+
+function updatePopulation() {
+  for (const nest of nests) {
+    nest.birthTimer++;
+    if (nest.birthTimer < BIRTH_INTERVAL) continue;
+    nest.birthTimer = 0;
+
+    // Count current ants and check for queen
+    let myAnts = 0;
+    let hasQueen = false;
+    for (const a of ants) {
+      if (a.nestId === nest.id) {
+        myAnts++;
+        if (a.role === 'queen') hasQueen = true;
+      }
+    }
+
+    // Update queenless state
+    if (!hasQueen && !nest.queenless) {
+      nest.queenless = true;
+      nest.queenlessTick = simTick;
+    }
+
+    // Queenless colonies: no births, and ants get increasingly disorganized
+    if (nest.queenless) {
+      // After 2000 ticks without queen, ants start dying faster (morale collapse)
+      const ticksSinceQueen = simTick - nest.queenlessTick;
+      if (ticksSinceQueen > 2000 && myAnts > 0 && Math.random() < 0.005) {
+        // Random ant dies from "colony collapse"
+        for (let i = ants.length - 1; i >= 0; i--) {
+          if (ants[i].nestId === nest.id && ants[i].role !== 'queen') {
+            killAnt(i, 'collapse');
+            break;
+          }
+        }
+      }
+      continue; // no births
+    }
+
+    const maxAnts = Math.floor(numAntsPerNest * 1.5);
+
+    // Birth: if food bank has enough, spawn an ant
+    if (nest.foodBank >= BIRTH_FOOD_COST && myAnts < maxAnts) {
+      nest.foodBank -= BIRTH_FOOD_COST;
+      const role = pickRole();
+      ants.push(createAnt(nest.x, nest.y, nest.id, role));
+      nest.totalBorn++;
+    }
+
+    // Colony splitting — if enough food and colony is thriving, spawn a founding queen
+    if (nest.foodCollected >= QUEEN_FOUNDING_FOOD && myAnts > numAntsPerNest * 0.8 && nests.length < 8) {
+      // Check we haven't already got a founding queen out
+      let hasFounding = false;
+      for (const a of ants) {
+        if (a.nestId === nest.id && a.founding) { hasFounding = true; break; }
+      }
+      if (!hasFounding && Math.random() < 0.002) { // rare event
+        // Spend food to produce founding queen
+        nest.foodBank = Math.max(0, nest.foodBank - 50);
+        nest.foodCollected -= 100; // permanent cost
+        const queen = createAnt(nest.x, nest.y, nest.id, 'queen');
+        queen.founding = true;
+        // Pick a random distant location
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 150 + Math.random() * 200;
+        queen.foundingTarget = {
+          x: Math.max(30, Math.min(W - 30, nest.x + Math.cos(angle) * dist)),
+          y: Math.max(30, Math.min(H - 30, nest.y + Math.sin(angle) * dist)),
+        };
+        ants.push(queen);
+        logEvent('birth', `${nest.colour.name} colony sends out a founding queen!`);
+      }
+    }
+  }
+}
+
+// === PHEROMONE UPDATE ===
+function updatePheromones() {
+  for (const nest of nests) {
+    const hp = nest.homePh, fp = nest.foodPh;
+    const th = nest.tempHome, tf = nest.tempFood;
+    const diff = diffusionRate;
+    const keep = 1 - diff;
+    for (let y = 1; y < GH - 1; y++) {
+      for (let x = 1; x < GW - 1; x++) {
+        const i = idx(x, y);
+        if (walls[i]) continue;
+        const avgH = (hp[idx(x-1,y)] + hp[idx(x+1,y)] + hp[idx(x,y-1)] + hp[idx(x,y+1)]) * 0.25;
+        th[i] = (hp[i] * keep + avgH * diff) * evapRate;
+        const avgF = (fp[idx(x-1,y)] + fp[idx(x+1,y)] + fp[idx(x,y-1)] + fp[idx(x,y+1)]) * 0.25;
+        tf[i] = (fp[i] * keep + avgF * diff) * evapRate;
+      }
+    }
+    nest.homePh = th; nest.tempHome = hp;
+    nest.foodPh = tf; nest.tempFood = fp;
+  }
+
+  // Alarm pheromone evaporates faster
+  for (let i = 0; i < alarmPh.length; i++) {
+    alarmPh[i] *= 0.98;
+    if (alarmPh[i] < 0.1) alarmPh[i] = 0;
+  }
+  // Trail wear decays very slowly — paths that aren't used fade over time
+  if (simTick % 120 === 0) {
+    for (let i = 0; i < trailWear.length; i++) {
+      trailWear[i] *= 0.995;
+    }
+  }
+}
+
+// Food regrowth
+let regrowthCounter = 0;
+function regrowFood() {
+  regrowthCounter++;
+  if (regrowthCounter % 120 !== 0) return;
+  const samples = Math.min(500, GW * GH / 20);
+  for (let s = 0; s < samples; s++) {
+    const x = Math.floor(Math.random() * (GW - 2)) + 1;
+    const y = Math.floor(Math.random() * (GH - 2)) + 1;
+    const i = idx(x, y);
+    if (walls[i] || food[i] > 0) continue;
+    const hasNeighbourFood =
+      food[idx(x-1,y)] > 2 || food[idx(x+1,y)] > 2 ||
+      food[idx(x,y-1)] > 2 || food[idx(x,y+1)] > 2;
+    if (hasNeighbourFood && Math.random() < 0.08) {
+      food[i] = 1 + Math.random() * 2;
+      // Inherit type from neighbour
+      const neighbours = [idx(x-1,y), idx(x+1,y), idx(x,y-1), idx(x,y+1)];
+      for (const ni of neighbours) {
+        if (food[ni] > 2) { foodType[i] = foodType[ni]; break; }
+      }
+      totalFood++;
+    }
+  }
+}
+
+// Rock placement
+function placeRock(px, py, radius) {
+  const cx = toGrid(px); const cy = toGrid(py);
+  const r = Math.ceil(radius / CELL);
+  const seed = px * 31 + py * 17;
+  for (let dy = -r - 2; dy <= r + 2; dy++) {
+    for (let dx = -r - 2; dx <= r + 2; dx++) {
+      const gx = cx + dx, gy = cy + dy;
+      if (!inBounds(gx, gy)) continue;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx);
+      const noise = Math.sin(angle * 3 + seed) * 0.3 + Math.sin(angle * 7 + seed * 2.3) * 0.15;
+      if (dist < r * (1 + noise)) {
+        walls[idx(gx, gy)] = 1;
+      }
+    }
+  }
+}
+
+function rockShade(gx, gy) {
+  const h = ((gx * 374761 + gy * 668265) & 0xFFFF) / 65536;
+  const base = 45 + h * 30;
+  return [base + 5, base, base - 5];
+}
+
+// === RENDERING ===
+let pheromoneImage;
+function ensurePheromoneImage() {
+  if (!pheromoneImage || pheromoneImage.width !== GW || pheromoneImage.height !== GH) {
+    pheromoneImage = ctx.createImageData(GW, GH);
+  }
+}
+
+function render() {
+  // Screen shake for earthquake
+  if (quakeTimer > 0) {
+    quakeTimer--;
+    ctx.setTransform(1, 0, 0, 1, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8);
+  }
+
+  const day = getDayPhase();
+  const bgR = day.groundR, bgG = day.groundG, bgB = day.groundB;
+  ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Sky gradient during dawn/dusk
+  if (day.phase === 'Dawn' || day.phase === 'Dusk') {
+    const grad = ctx.createLinearGradient(0, 0, 0, H * 0.25);
+    const hueShift = day.phase === 'Dawn' ? '80,40,20' : '60,30,40';
+    grad.addColorStop(0, `rgba(${hueShift},${0.15 * (1 - day.nightAmount)})`);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H * 0.25);
+  }
+
+  // Stars at night
+  if (day.nightAmount > 0.1) {
+    const starAlpha = day.nightAmount * 0.8;
+    for (const star of stars) {
+      const twinkle = Math.sin(simTick * 0.02 * star.speed + star.twinkle) * 0.3 + 0.7;
+      const a = starAlpha * twinkle;
+      ctx.fillStyle = `rgba(220,230,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(star.x * W, star.y * H, star.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ensurePheromoneImage();
+  const data = pheromoneImage.data;
+
+  for (let y = 0; y < GH; y++) {
+    for (let x = 0; x < GW; x++) {
+      const i = idx(x, y);
+      const pi = (y * GW + x) * 4;
+
+      if (walls[i]) {
+        const [cr, cg, cb] = rockShade(x, y);
+        data[pi] = cr; data[pi+1] = cg; data[pi+2] = cb; data[pi+3] = 255;
+        continue;
+      }
+      if (food[i] > 0) {
+        const foodGlow = 1 + day.nightAmount * 0.5;
+        const ft = FOOD_TYPES[foodType[i]] || FOOD_TYPES[0];
+        const intensity = Math.min(1, 0.4 + food[i] * 0.12);
+        data[pi]   = Math.min(255, ft.color[0] * intensity * foodGlow);
+        data[pi+1] = Math.min(255, ft.color[1] * intensity * foodGlow);
+        data[pi+2] = Math.min(255, ft.color[2] * intensity * foodGlow);
+        data[pi+3] = 255;
+        continue;
+      }
+
+      // === VIEW MODE RENDERING ===
+      if (viewMode === 'home' || viewMode === 'food') {
+        // Heat map for single pheromone type
+        let r = 0, g = 0, b = 0, any = false;
+        for (const nest of nests) {
+          const v = viewMode === 'home' ? nest.homePh[i] : nest.foodPh[i];
+          if (v < 0.5) continue;
+          any = true;
+          const intensity = Math.min(1, v / 60);
+          const c = nest.colour;
+          if (viewMode === 'home') {
+            r += c.home[0] * intensity;
+            g += c.home[1] * intensity;
+            b += c.home[2] * intensity;
+          } else {
+            r += c.trail[0] * intensity;
+            g += c.trail[1] * intensity;
+            b += c.trail[2] * intensity;
+          }
+        }
+        if (any) {
+          data[pi] = Math.min(255, r);
+          data[pi+1] = Math.min(255, g);
+          data[pi+2] = Math.min(255, b);
+          data[pi+3] = 255;
+        } else {
+          data[pi] = 0; data[pi+1] = 0; data[pi+2] = 0; data[pi+3] = 0;
+        }
+      } else if (viewMode === 'wear') {
+        // Trail wear heat map — purple to white
+        const w = trailWear[i];
+        if (w > 0.3) {
+          const intensity = Math.min(1, w / 25);
+          data[pi]   = Math.floor(60 + intensity * 195);
+          data[pi+1] = Math.floor(30 + intensity * 160);
+          data[pi+2] = Math.floor(80 + intensity * 175);
+          data[pi+3] = 255;
+        } else {
+          data[pi] = 0; data[pi+1] = 0; data[pi+2] = 0; data[pi+3] = 0;
+        }
+      } else {
+        // Normal view — blended pheromones
+        const alarm = alarmPh[i];
+        const glowBoost = 1 + day.nightAmount * 0.8;
+        let r = 0, g = 0, b = 0, any = false;
+        for (const nest of nests) {
+          const hv = nest.homePh[i];
+          const fv = nest.foodPh[i];
+          if (hv < 0.5 && fv < 0.5) continue;
+          any = true;
+          const c = nest.colour;
+          const fi = Math.min(1, fv / 80) * glowBoost;
+          const hi = Math.min(1, hv / 80) * glowBoost;
+          r += c.trail[0] * fi + c.home[0] * hi;
+          g += c.trail[1] * fi + c.home[1] * hi;
+          b += c.trail[2] * fi + c.home[2] * hi;
+        }
+        if (alarm > 1) {
+          any = true;
+          const ai = Math.min(1, alarm / 100);
+          r += 200 * ai; g += 30 * ai; b += 30 * ai;
+        }
+        if (any) {
+          data[pi] = Math.min(255, r);
+          data[pi+1] = Math.min(255, g);
+          data[pi+2] = Math.min(255, b);
+          data[pi+3] = 255;
+        } else if (trailWear[i] > 0.5) {
+          const w = Math.min(1, trailWear[i] / 20);
+          data[pi] = Math.floor(bgR + w * 12);
+          data[pi+1] = Math.floor(bgG + w * 10);
+          data[pi+2] = Math.floor(bgB + w * 6);
+          data[pi+3] = 255;
+        } else {
+          data[pi] = 0; data[pi+1] = 0; data[pi+2] = 0; data[pi+3] = 0;
+        }
+      }
+    }
+  }
+
+  const offscreen = new OffscreenCanvas(GW, GH);
+  const octx = offscreen.getContext('2d');
+  octx.putImageData(pheromoneImage, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(offscreen, 0, 0, W, H);
+
+  // Draw puddles as translucent blue overlay
+  let hasPuddles = false;
+  for (let pi2 = 0; pi2 < puddles.length; pi2++) {
+    if (puddles[pi2] > 0.02) { hasPuddles = true; break; }
+  }
+  if (hasPuddles) {
+    const puddleCanvas = new OffscreenCanvas(GW, GH);
+    const pctx = puddleCanvas.getContext('2d');
+    const pdata = pctx.createImageData(GW, GH);
+    const pd = pdata.data;
+    for (let y = 0; y < GH; y++) {
+      for (let x = 0; x < GW; x++) {
+        const ci = idx(x, y);
+        const wl = puddles[ci];
+        if (wl < 0.02 || walls[ci]) continue;
+        const pidx = (y * GW + x) * 4;
+        // Shimmer based on position and time
+        const shimmer = Math.sin(x * 0.3 + simTick * 0.05) * 0.1 + Math.sin(y * 0.4 + simTick * 0.03) * 0.1;
+        const depth = Math.min(1, wl + shimmer);
+        pd[pidx]   = Math.floor(40 + depth * 40);  // dark blue
+        pd[pidx+1] = Math.floor(60 + depth * 60);
+        pd[pidx+2] = Math.floor(120 + depth * 80);
+        pd[pidx+3] = Math.floor(depth * 140);
+      }
+    }
+    pctx.putImageData(pdata, 0, 0);
+    ctx.drawImage(puddleCanvas, 0, 0, W, H);
+  }
+
+  // Draw spider webs
+  for (const spider of spiders) {
+    // Web
+    ctx.beginPath();
+    ctx.arc(spider.x, spider.y, spider.webRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(200,200,220,0.08)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Web threads
+    const threads = 8;
+    for (let t = 0; t < threads; t++) {
+      const a = (t / threads) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(spider.x, spider.y);
+      ctx.lineTo(
+        spider.x + Math.cos(a) * spider.webRadius,
+        spider.y + Math.sin(a) * spider.webRadius
+      );
+      ctx.strokeStyle = 'rgba(200,200,220,0.06)';
+      ctx.stroke();
+    }
+
+    // Concentric rings
+    for (let ring = 0.3; ring <= 1; ring += 0.35) {
+      ctx.beginPath();
+      ctx.arc(spider.x, spider.y, spider.webRadius * ring, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(200,200,220,0.05)';
+      ctx.stroke();
+    }
+
+    // Spider body
+    let spX = spider.x, spY = spider.y;
+    if (spider.lungeTarget) {
+      const t = spider.lungeTimer / 10;
+      spX += (spider.lungeTarget.x - spider.x) * Math.sin(t * Math.PI) * 0.5;
+      spY += (spider.lungeTarget.y - spider.y) * Math.sin(t * Math.PI) * 0.5;
+    }
+
+    // Legs
+    const legAngles = [-0.6, -0.3, 0.3, 0.6, Math.PI - 0.6, Math.PI - 0.3, Math.PI + 0.3, Math.PI + 0.6];
+    ctx.strokeStyle = 'rgba(80,70,60,0.8)';
+    ctx.lineWidth = 0.8;
+    for (const la of legAngles) {
+      const a = spider.angle + la;
+      const legLen = spider.bodySize * 2.5;
+      const midX = spX + Math.cos(a) * legLen * 0.5;
+      const midY = spY + Math.sin(a) * legLen * 0.5;
+      const endX = spX + Math.cos(a + 0.3) * legLen;
+      const endY = spY + Math.sin(a + 0.3) * legLen;
+      ctx.beginPath();
+      ctx.moveTo(spX, spY);
+      ctx.quadraticCurveTo(midX, midY - 2, endX, endY);
+      ctx.stroke();
+    }
+
+    // Abdomen
+    ctx.fillStyle = 'rgba(60,50,40,0.9)';
+    ctx.beginPath();
+    const abX = spX - Math.cos(spider.angle) * spider.bodySize * 0.8;
+    const abY = spY - Math.sin(spider.angle) * spider.bodySize * 0.8;
+    ctx.ellipse(abX, abY, spider.bodySize * 1.2, spider.bodySize * 0.9, spider.angle, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Cephalothorax
+    ctx.fillStyle = 'rgba(70,55,45,0.9)';
+    ctx.beginPath();
+    ctx.arc(spX, spY, spider.bodySize * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes (two red dots)
+    const eyeDist = spider.bodySize * 0.4;
+    for (const side of [-0.3, 0.3]) {
+      const ex = spX + Math.cos(spider.angle + side) * eyeDist;
+      const ey = spY + Math.sin(spider.angle + side) * eyeDist;
+      ctx.fillStyle = 'rgba(180,40,40,0.8)';
+      ctx.beginPath();
+      ctx.arc(ex, ey, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Kill count
+    if (spider.killCount > 0) {
+      ctx.fillStyle = 'rgba(180,100,100,0.5)';
+      ctx.font = '9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText(spider.killCount, spider.x, spider.y + spider.webRadius + 12);
+    }
+  }
+
+  // Draw beetles
+  for (const beetle of beetles) {
+    const bx = beetle.x, by = beetle.y, bs = beetle.bodySize;
+
+    // Health bar
+    if (beetle.hp < beetle.maxHp) {
+      ctx.fillStyle = 'rgba(40,0,0,0.6)';
+      ctx.fillRect(bx - 10, by - bs - 6, 20, 3);
+      ctx.fillStyle = `rgba(${beetle.hp > 5 ? 200 : 255},${beetle.hp > 5 ? 180 : 60},0,0.8)`;
+      ctx.fillRect(bx - 10, by - bs - 6, 20 * (beetle.hp / beetle.maxHp), 3);
+    }
+
+    // Legs (6 legs, 3 per side)
+    ctx.strokeStyle = 'rgba(50,35,20,0.9)';
+    ctx.lineWidth = 1.2;
+    for (let side = -1; side <= 1; side += 2) {
+      for (let leg = -1; leg <= 1; leg++) {
+        const la = beetle.angle + side * (0.7 + leg * 0.3);
+        const legLen = bs * 1.8;
+        const walkPhase = Math.sin(beetle.mandibleAnim * 3 + leg * 2 + side) * 0.15;
+        const endX = bx + Math.cos(la + walkPhase) * legLen;
+        const endY = by + Math.sin(la + walkPhase) * legLen;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      }
+    }
+
+    // Body (dark shell with sheen)
+    ctx.fillStyle = 'rgba(35,25,15,0.95)';
+    ctx.beginPath();
+    ctx.ellipse(bx, by, bs * 1.3, bs * 0.9, beetle.angle, 0, Math.PI * 2);
+    ctx.fill();
+    // Shell highlight
+    ctx.fillStyle = 'rgba(80,60,40,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(bx - Math.cos(beetle.angle) * 1, by - Math.sin(beetle.angle) * 1, bs * 0.8, bs * 0.5, beetle.angle, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Head
+    const bhx = bx + Math.cos(beetle.angle) * bs * 1.1;
+    const bhy = by + Math.sin(beetle.angle) * bs * 1.1;
+    ctx.fillStyle = 'rgba(45,30,15,0.95)';
+    ctx.beginPath();
+    ctx.arc(bhx, bhy, bs * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mandibles (animated)
+    const mandOpen = 0.2 + Math.sin(beetle.mandibleAnim) * 0.15;
+    ctx.strokeStyle = 'rgba(70,45,20,0.9)';
+    ctx.lineWidth = 1.5;
+    for (const side of [-mandOpen, mandOpen]) {
+      const mx = bhx + Math.cos(beetle.angle + side) * bs * 0.9;
+      const my = bhy + Math.sin(beetle.angle + side) * bs * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(bhx, bhy);
+      ctx.lineTo(mx, my);
+      ctx.stroke();
+    }
+
+    // Eyes
+    for (const side of [-0.35, 0.35]) {
+      const ex = bhx + Math.cos(beetle.angle + side) * bs * 0.35;
+      const ey = bhy + Math.sin(beetle.angle + side) * bs * 0.35;
+      ctx.fillStyle = 'rgba(160,80,20,0.8)';
+      ctx.beginPath();
+      ctx.arc(ex, ey, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Kill count
+    if (beetle.killCount > 0) {
+      ctx.fillStyle = 'rgba(180,120,60,0.5)';
+      ctx.font = '9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText(beetle.killCount, beetle.x, beetle.y + bs + 12);
+    }
+  }
+
+  // Draw nests — glow more at night
+  const nestGlowR = day.nightAmount > 0.3 ? 24 + day.nightAmount * 16 : 24;
+  for (const nest of nests) {
+    const c = nest.colour;
+    const grad = ctx.createRadialGradient(nest.x, nest.y, 2, nest.x, nest.y, nestGlowR);
+    const baseAlpha = 0.9 + day.nightAmount * 0.1;
+    grad.addColorStop(0, c.mound + baseAlpha + ')');
+    grad.addColorStop(0.5, c.mound + (0.5 + day.nightAmount * 0.2) + ')');
+    grad.addColorStop(1, c.mound + '0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(nest.x, nest.y, nestGlowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(nest.x, nest.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#0a0600';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(nest.x, nest.y, 8, 0, Math.PI * 2);
+    ctx.strokeStyle = c.mound + '0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Ant count for this nest
+    let myAnts = 0;
+    for (const a of ants) if (a.nestId === nest.id) myAnts++;
+
+    // Queenless indicator — skull and flickering
+    if (nest.queenless) {
+      const flicker = 0.3 + Math.sin(simTick * 0.15) * 0.15;
+      ctx.fillStyle = `rgba(200,60,60,${flicker})`;
+      ctx.font = '12px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText('\u2620', nest.x, nest.y - 16);
+    }
+
+    ctx.fillStyle = nest.queenless ? 'rgba(180,120,120,0.5)' : 'rgba(200,190,170,0.6)';
+    ctx.font = '10px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${Math.floor(nest.foodCollected)} food | ${myAnts} ants`, nest.x, nest.y + 32);
+
+    // Hover tooltip with detailed stats
+    const ndx = mouseX - nest.x, ndy = mouseY - nest.y;
+    if (mouseOver && ndx * ndx + ndy * ndy < 900) {
+      let scouts = 0, workers = 0, soldiers = 0, queens = 0;
+      for (const a of ants) {
+        if (a.nestId !== nest.id) continue;
+        if (a.role === 'scout') scouts++;
+        else if (a.role === 'worker') workers++;
+        else if (a.role === 'queen') queens++;
+        else soldiers++;
+      }
+      const queenStatus = nest.queenless ? '\u2620 QUEENLESS' : `\u2655 Queen (${queens})`;
+      const lines = [
+        c.name + ' Colony',
+        `Pop: ${myAnts} (S:${scouts} W:${workers} F:${soldiers})`,
+        queenStatus,
+        `Food: ${Math.floor(nest.foodCollected)} (bank: ${Math.floor(nest.foodBank)})`,
+        `Born: ${nest.totalBorn} | Died: ${nest.totalDied} | Kills: ${nest.kills}`,
+      ];
+      const tx = nest.x + 30, ty = nest.y - 30;
+      ctx.fillStyle = 'rgba(15,12,8,0.9)';
+      ctx.strokeStyle = c.mound + '0.5)';
+      ctx.lineWidth = 1;
+      const tw = 200, th = lines.length * 14 + 8;
+      const ttx = Math.min(tx, W - tw - 10);
+      const tty = Math.max(ty, 10);
+      ctx.fillRect(ttx, tty, tw, th);
+      ctx.strokeRect(ttx, tty, tw, th);
+      ctx.fillStyle = '#c8c0b0';
+      ctx.font = '11px system-ui';
+      ctx.textAlign = 'left';
+      lines.forEach((l, li) => {
+        ctx.fillStyle = li === 0 ? c.carry : '#a0a098';
+        ctx.fillText(l, ttx + 6, tty + 14 + li * 14);
+      });
+    }
+  }
+
+  // Draw ants with role distinction
+  for (const ant of ants) {
+    const nest = getNest(ant.nestId);
+    if (!nest) continue;
+    const c = nest.colour;
+    const role = ROLES[ant.role];
+    const sz = role.size;
+
+    // Colour based on role and state
+    let colour;
+    if (ant.role === 'queen') {
+      colour = c.queen;
+    } else if (ant.hasFood) {
+      colour = c.carry;
+    } else if (ant.role === 'soldier') {
+      colour = c.soldier;
+    } else if (ant.role === 'scout') {
+      colour = c.scout;
+    } else {
+      colour = c.body;
+    }
+
+    // Queen glow aura
+    if (ant.role === 'queen') {
+      const pulse = 0.3 + Math.sin(simTick * 0.05) * 0.1;
+      const grad = ctx.createRadialGradient(ant.x, ant.y, 2, ant.x, ant.y, 14);
+      grad.addColorStop(0, `rgba(255,220,100,${pulse})`);
+      grad.addColorStop(1, 'rgba(255,200,50,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(ant.x, ant.y, 14, 0, Math.PI * 2);
+      ctx.fill();
+      if (ant.founding) {
+        // Founding queen gets a ring marker
+        ctx.strokeStyle = `rgba(255,220,100,${0.4 + Math.sin(simTick * 0.1) * 0.2})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(ant.x, ant.y, 10, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.fillStyle = colour;
+
+    // Body
+    ctx.beginPath();
+    ctx.ellipse(ant.x, ant.y, 2.5 * sz, 1.5 * sz, ant.angle, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Queen abdomen (extra large rear segment)
+    if (ant.role === 'queen') {
+      const abx = ant.x - Math.cos(ant.angle) * 4;
+      const aby = ant.y - Math.sin(ant.angle) * 4;
+      ctx.fillStyle = colour;
+      ctx.beginPath();
+      ctx.ellipse(abx, aby, 3.5, 2.5, ant.angle, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Head
+    const hx = ant.x + Math.cos(ant.angle) * 2.5 * sz;
+    const hy = ant.y + Math.sin(ant.angle) * 2.5 * sz;
+    ctx.beginPath();
+    ctx.arc(hx, hy, 1.2 * sz, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Queen crown (3 small dots above head)
+    if (ant.role === 'queen') {
+      ctx.fillStyle = 'rgba(255,220,80,0.9)';
+      const crownBase = ant.angle - Math.PI / 2;
+      for (const offset of [-0.4, 0, 0.4]) {
+        const cx = hx + Math.cos(crownBase + offset) * 3.5;
+        const cy = hy + Math.sin(crownBase + offset) * 3.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Soldier mandibles
+    if (ant.role === 'soldier') {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 0.8;
+      for (const side of [-0.4, 0.4]) {
+        const mx = hx + Math.cos(ant.angle + side) * 3;
+        const my = hy + Math.sin(ant.angle + side) * 3;
+        ctx.beginPath();
+        ctx.moveTo(hx, hy);
+        ctx.lineTo(mx, my);
+        ctx.stroke();
+      }
+    }
+
+    // Scout antennae (longer)
+    if (ant.role === 'scout') {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 0.5;
+      for (const side of [-0.5, 0.5]) {
+        const ax = hx + Math.cos(ant.angle + side) * 4;
+        const ay = hy + Math.sin(ant.angle + side) * 4;
+        ctx.beginPath();
+        ctx.moveTo(hx, hy);
+        ctx.lineTo(ax, ay);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Draw particles
+  for (const p of particles) {
+    const alpha = p.life / p.maxLife;
+    if (p.type === 'combat') ctx.fillStyle = `rgba(255,100,50,${alpha})`;
+    else if (p.type === 'predator') ctx.fillStyle = `rgba(180,60,180,${alpha})`;
+    else if (p.type === 'food') ctx.fillStyle = `rgba(80,230,60,${alpha})`;
+    else if (p.type === 'seeds') ctx.fillStyle = `rgba(220,180,40,${alpha})`;
+    else if (p.type === 'fruit') ctx.fillStyle = `rgba(230,60,50,${alpha})`;
+    else if (p.type === 'deliver') ctx.fillStyle = `rgba(255,200,50,${alpha})`;
+    else if (p.type === 'queen') ctx.fillStyle = `rgba(255,220,80,${alpha})`;
+    else if (p.type === 'collapse') ctx.fillStyle = `rgba(100,100,100,${alpha * 0.5})`;
+    else ctx.fillStyle = `rgba(150,150,150,${alpha})`;
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Fireflies at night
+  if (day.nightAmount > 0.3) {
+    const ffAlpha = day.nightAmount * 0.7;
+    const ffCount = Math.floor(day.nightAmount * 12);
+    for (let fi = 0; fi < ffCount; fi++) {
+      const fx = (Math.sin(simTick * 0.008 + fi * 7.3) * 0.3 + 0.5) * W +
+                 Math.sin(simTick * 0.015 + fi * 13.1) * 40;
+      const fy = (Math.cos(simTick * 0.006 + fi * 11.7) * 0.3 + 0.5) * H +
+                 Math.cos(simTick * 0.012 + fi * 5.9) * 30;
+      const pulse = (Math.sin(simTick * 0.05 + fi * 3.7) + 1) * 0.5;
+      const a = ffAlpha * pulse;
+      if (a > 0.05) {
+        const grad = ctx.createRadialGradient(fx, fy, 0, fx, fy, 8);
+        grad.addColorStop(0, `rgba(180,220,60,${a})`);
+        grad.addColorStop(0.5, `rgba(140,180,30,${a * 0.4})`);
+        grad.addColorStop(1, `rgba(100,140,20,0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(fx, fy, 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Rain atmosphere — darken and blue-shift during rain
+  if (rainIntensity > 0) {
+    ctx.fillStyle = `rgba(20,30,50,${rainIntensity * 0.15})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Rain drops + splash ripples
+  for (let i = rainDrops.length - 1; i >= 0; i--) {
+    const drop = rainDrops[i];
+    drop.y += drop.speed;
+    drop.life--;
+    if (drop.life <= 0 || drop.y > H + 20) {
+      // Spawn ripple if landing in a puddle
+      if (drop.y <= H && drop.y > 0) {
+        const gx = toGrid(drop.x), gy = toGrid(drop.y);
+        if (inBounds(gx, gy) && puddles[idx(gx, gy)] > 0.1) {
+          ripples.push({ x: drop.x, y: drop.y, r: 1, maxR: 6 + Math.random() * 4, life: 1 });
+        }
+      }
+      rainDrops.splice(i, 1); continue;
+    }
+    ctx.strokeStyle = `rgba(120,150,200,${0.3 * (drop.life / 60)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(drop.x, drop.y);
+    ctx.lineTo(drop.x - 1, drop.y - drop.length);
+    ctx.stroke();
+  }
+
+  // Puddle ripples
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const rip = ripples[i];
+    rip.r += 0.3;
+    rip.life -= 0.03;
+    if (rip.life <= 0 || rip.r > rip.maxR) { ripples.splice(i, 1); continue; }
+    ctx.strokeStyle = `rgba(140,170,220,${rip.life * 0.3})`;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.arc(rip.x, rip.y, rip.r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Reset transform after shake
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // Brush preview
+  if (mouseOver) {
+    ctx.beginPath();
+    ctx.arc(mouseX, mouseY, brushRadius, 0, Math.PI * 2);
+    const foodColors = ['rgba(80,200,80,0.4)', 'rgba(200,170,40,0.4)', 'rgba(200,60,60,0.4)'];
+    ctx.strokeStyle = tool === 'food' ? foodColors[currentFoodType] :
+                      tool === 'rock' ? 'rgba(140,110,70,0.4)' :
+                      tool === 'erase' ? 'rgba(255,100,100,0.3)' :
+                      tool === 'spider' ? 'rgba(160,80,160,0.4)' :
+                      tool === 'beetle' ? 'rgba(140,80,30,0.4)' :
+                      'rgba(200,150,50,0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+// Colony legend
+function updateLegend() {
+  const el = document.getElementById('colonyLegend');
+  el.innerHTML = nests.map(n => {
+    const c = n.colour;
+    let myAnts = 0;
+    for (const a of ants) if (a.nestId === n.id) myAnts++;
+    const queenIcon = n.queenless ? ' <span style="color:#a04040" title="Queenless">\u2620</span>' : ' <span style="color:#d4a050;font-size:0.8em" title="Queen">\u2655</span>';
+    return `<div class="colony-row" style="${n.queenless ? 'opacity:0.6' : ''}">
+      <span class="cname"><span class="colony-dot" style="background:${c.carry}"></span>${c.name}${queenIcon}</span>
+      <span class="colony-info">
+        <span class="val" id="score${n.id}" title="Food collected">${Math.floor(n.foodCollected)}</span>
+        <span class="val" style="color:#6a8a6a" id="pop${n.id}" title="Population">${myAnts}</span>
+        ${n.kills > 0 ? `<span class="val" style="color:#a06040" title="Kills">${n.kills}</span>` : ''}
+      </span>
+    </div>`;
+  }).join('');
+}
+
+// === INTERACTION ===
+let mouseX = 0, mouseY = 0, mouseDown = false, mouseOver = false;
+
+function getXY(e) {
+  if (e.touches && e.touches.length > 0) return [e.touches[0].clientX, e.touches[0].clientY];
+  return [e.clientX, e.clientY];
+}
+
+function isOnUI(x, y) {
+  const ui = document.getElementById('ui');
+  const toggle = document.getElementById('toggleUI');
+  for (const el of [ui, toggle]) {
+    const r = el.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+  }
+  return false;
+}
+
+canvas.addEventListener('mousemove', e => {
+  mouseX = e.clientX; mouseY = e.clientY; mouseOver = true;
+  if (mouseDown) applyTool(e.clientX, e.clientY);
+});
+canvas.addEventListener('mousedown', e => {
+  if (isOnUI(e.clientX, e.clientY)) return;
+  mouseDown = true; applyTool(e.clientX, e.clientY);
+});
+canvas.addEventListener('mouseup', () => { mouseDown = false; applyTool._placed = false; });
+canvas.addEventListener('mouseleave', () => { mouseDown = false; mouseOver = false; });
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  brushRadius = Math.max(3, Math.min(80, brushRadius - e.deltaY * 0.05));
+  document.getElementById('valBrush').textContent = Math.round(brushRadius);
+}, { passive: false });
+
+canvas.addEventListener('touchstart', e => {
+  const [x, y] = getXY(e);
+  if (isOnUI(x, y)) return;
+  e.preventDefault(); mouseDown = true; mouseX = x; mouseY = y; mouseOver = true;
+  applyTool(x, y);
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  const [x, y] = getXY(e);
+  if (isOnUI(x, y)) return;
+  e.preventDefault(); mouseX = x; mouseY = y;
+  if (mouseDown) applyTool(x, y);
+}, { passive: false });
+canvas.addEventListener('touchend', () => { mouseDown = false; mouseOver = false; applyTool._placed = false; });
+
+function applyTool(px, py) {
+  if (tool === 'nest') {
+    if (!applyTool._placed) {
+      addNestAt(px, py);
+      applyTool._placed = true;
+    }
+    return;
+  }
+  if (tool === 'spider') {
+    if (!applyTool._placed) {
+      spiders.push(createSpider(px, py));
+      applyTool._placed = true;
+      logEvent('predator', 'Spider placed!');
+    }
+    return;
+  }
+  if (tool === 'beetle') {
+    if (!applyTool._placed) {
+      beetles.push(createBeetle(px, py));
+      applyTool._placed = true;
+      logEvent('predator', 'Beetle placed! It will hunt nests...');
+    }
+    return;
+  }
+  applyTool._placed = false;
+
+  if (tool === 'rock') { placeRock(px, py, brushRadius); return; }
+
+  const cx = toGrid(px); const cy = toGrid(py);
+  const r = Math.ceil(brushRadius / CELL);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx*dx + dy*dy > r*r) continue;
+      const gx = cx + dx, gy = cy + dy;
+      if (!inBounds(gx, gy)) continue;
+      const i = idx(gx, gy);
+      if (tool === 'food') {
+        if (!walls[i]) {
+          const before = food[i] > 0;
+          food[i] = Math.min(10, food[i] + 2);
+          foodType[i] = currentFoodType;
+          if (!before && food[i] > 0) totalFood++;
+        }
+      } else if (tool === 'erase') {
+        walls[i] = 0;
+        if (food[i] > 0) { totalFood--; food[i] = 0; }
+        for (const nest of nests) {
+          nest.homePh[i] = 0; nest.foodPh[i] = 0;
+        }
+        alarmPh[i] = 0;
+        // Remove spiders and beetles in erase area
+        for (let si = spiders.length - 1; si >= 0; si--) {
+          const sdx = spiders[si].x - px, sdy = spiders[si].y - py;
+          if (sdx * sdx + sdy * sdy < brushRadius * brushRadius) {
+            spiders.splice(si, 1);
+          }
+        }
+        for (let bi = beetles.length - 1; bi >= 0; bi--) {
+          const bdx = beetles[bi].x - px, bdy = beetles[bi].y - py;
+          if (bdx * bdx + bdy * bdy < brushRadius * brushRadius) {
+            beetles.splice(bi, 1);
+          }
+        }
+      }
+    }
+  }
+}
+
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('#controls button').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('btn' + t.charAt(0).toUpperCase() + t.slice(1));
+  if (btn) btn.classList.add('active');
+}
+
+function cycleFoodType() {
+  currentFoodType = (currentFoodType + 1) % 3;
+  const names = ['Crumbs', 'Seeds', 'Fruit'];
+  const colors = ['#60a060', '#c8a840', '#c04040'];
+  document.getElementById('btnFood').textContent = names[currentFoodType];
+  document.getElementById('btnFood').style.color = colors[currentFoodType];
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  ['viewNormal','viewHome','viewFood','viewWear'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      const isActive = id === 'view' + mode.charAt(0).toUpperCase() + mode.slice(1);
+      btn.style.background = isActive ? '#3a3020' : '#2a2418';
+      btn.style.borderColor = isActive ? '#7a6a48' : '#4a3a28';
+    }
+  });
+}
+
+function adjustAnts(delta) {
+  numAntsPerNest = Math.max(50, Math.min(800, numAntsPerNest + delta));
+  document.getElementById('valAnts').textContent = numAntsPerNest;
+  // Don't immediately add/remove — population dynamics will handle it
+}
+
+function adjustEvap(delta) {
+  evapLevel = Math.max(1, Math.min(9, evapLevel + delta));
+  evapRate = EVAP_MAP[evapLevel - 1];
+  document.getElementById('valEvap').textContent = evapLevel;
+}
+
+function adjustSpeed(delta) {
+  simSpeed = Math.max(1, Math.min(5, simSpeed + delta));
+  document.getElementById('valSpeed').textContent = simSpeed;
+}
+
+function adjustBrush(delta) {
+  brushRadius = Math.max(5, Math.min(80, brushRadius + delta));
+  document.getElementById('valBrush').textContent = Math.round(brushRadius);
+}
+
+function togglePanel() {
+  const ui = document.getElementById('ui');
+  ui.style.display = ui.style.display === 'none' ? '' : 'none';
+}
+
+function resetSim() {
+  ants = []; nests = []; spiders = []; beetles = []; particles = []; events.length = 0;
+  nestIdCounter = 0; totalFood = 0; simTick = 0; nestMap.clear();
+  initGrids(); setupDefault();
+}
+
+function setupDefault() {
+  addNestAt(W * 0.2, H * 0.5);
+
+  const foodSpots = [
+    { x: W * 0.7, y: H * 0.3, r: 30, type: 0 },  // crumbs
+    { x: W * 0.75, y: H * 0.7, r: 25, type: 1 },  // seeds
+    { x: W * 0.5, y: H * 0.15, r: 22, type: 0 },  // crumbs
+    { x: W * 0.55, y: H * 0.6, r: 12, type: 2 },  // fruit (smaller, more valuable)
+    { x: W * 0.85, y: H * 0.5, r: 20, type: 1 },  // seeds
+  ];
+  for (const spot of foodSpots) {
+    placeFood(spot.x, spot.y, spot.r, spot.type);
+  }
+
+  placeRock(W * 0.42, H * 0.38, 22);
+  placeRock(W * 0.55, H * 0.68, 18);
+  placeRock(W * 0.33, H * 0.22, 14);
+}
+
+// === SCENARIOS ===
+function clearAll() {
+  ants = []; nests = []; spiders = []; beetles = []; particles = []; events.length = 0;
+  nestIdCounter = 0; totalFood = 0; simTick = 0; nestMap.clear();
+  initGrids();
+}
+
+function placeFood(px, py, radius, type) {
+  if (type === undefined) type = Math.random() < 0.1 ? 2 : Math.random() < 0.3 ? 1 : 0; // weighted random
+  const cr = Math.ceil(radius / CELL);
+  const cx = toGrid(px), cy = toGrid(py);
+  for (let dy = -cr; dy <= cr; dy++) {
+    for (let dx = -cr; dx <= cr; dx++) {
+      if (dx*dx + dy*dy > cr*cr) continue;
+      const gx = cx + dx, gy = cy + dy;
+      if (inBounds(gx, gy) && !walls[idx(gx, gy)]) {
+        food[idx(gx, gy)] = 5 + Math.random() * 5;
+        foodType[idx(gx, gy)] = type;
+        totalFood++;
+      }
+    }
+  }
+}
+
+// Battle: Two colonies competing for shared food
+function scenarioBattle() {
+  clearAll();
+  addNestAt(W * 0.15, H * 0.5);
+  addNestAt(W * 0.85, H * 0.5);
+
+  // Contested food in the middle
+  placeFood(W * 0.5, H * 0.35, 35);
+  placeFood(W * 0.5, H * 0.65, 35);
+  placeFood(W * 0.45, H * 0.5, 25);
+
+  // Small home food for each
+  placeFood(W * 0.25, H * 0.3, 15);
+  placeFood(W * 0.75, H * 0.7, 15);
+
+  // Rocks creating a corridor
+  placeRock(W * 0.5, H * 0.15, 30);
+  placeRock(W * 0.5, H * 0.85, 30);
+
+  logEvent('combat', 'Battle scenario: two colonies, one battlefield');
+}
+
+// Siege: One colony surrounded by spiders, must break through
+function scenarioSiege() {
+  clearAll();
+  addNestAt(W * 0.5, H * 0.5);
+
+  // Ring of food around the edges
+  const spots = [
+    [0.15, 0.2], [0.85, 0.2], [0.15, 0.8], [0.85, 0.8],
+    [0.5, 0.1], [0.5, 0.9], [0.15, 0.5], [0.85, 0.5],
+  ];
+  for (const [fx, fy] of spots) {
+    placeFood(W * fx, H * fy, 20);
+  }
+
+  // Ring of spiders
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+    const sx = W * 0.5 + Math.cos(a) * W * 0.22;
+    const sy = H * 0.5 + Math.sin(a) * H * 0.22;
+    spiders.push(createSpider(sx, sy));
+  }
+
+  placeRock(W * 0.35, H * 0.35, 15);
+  placeRock(W * 0.65, H * 0.65, 15);
+
+  logEvent('predator', 'Siege scenario: break through the spider ring!');
+}
+
+// Gauntlet: Colony must navigate through spider-guarded corridors
+function scenarioGauntlet() {
+  clearAll();
+  addNestAt(W * 0.08, H * 0.5);
+
+  // Food at the far end
+  placeFood(W * 0.9, H * 0.3, 30);
+  placeFood(W * 0.9, H * 0.7, 30);
+
+  // Walls creating corridors
+  for (let y = 0.2; y <= 0.8; y += 0.3) {
+    for (let x = 0.25; x <= 0.75; x += 0.25) {
+      placeRock(W * x, H * y, 16);
+    }
+  }
+
+  // Spiders guarding corridors
+  spiders.push(createSpider(W * 0.35, H * 0.4));
+  spiders.push(createSpider(W * 0.5, H * 0.6));
+  spiders.push(createSpider(W * 0.65, H * 0.4));
+
+  logEvent('predator', 'Gauntlet: navigate the spider corridor!');
+}
+
+// Royale: 4 colonies, food in the center
+function scenarioRoyale() {
+  clearAll();
+  addNestAt(W * 0.12, H * 0.15);
+  addNestAt(W * 0.88, H * 0.15);
+  addNestAt(W * 0.12, H * 0.85);
+  addNestAt(W * 0.88, H * 0.85);
+
+  // Big food pile in center
+  placeFood(W * 0.5, H * 0.5, 45);
+  // Smaller food near each nest
+  placeFood(W * 0.25, H * 0.25, 12);
+  placeFood(W * 0.75, H * 0.25, 12);
+  placeFood(W * 0.25, H * 0.75, 12);
+  placeFood(W * 0.75, H * 0.75, 12);
+
+  // Central rocks
+  placeRock(W * 0.4, H * 0.4, 18);
+  placeRock(W * 0.6, H * 0.6, 18);
+  placeRock(W * 0.4, H * 0.6, 12);
+  placeRock(W * 0.6, H * 0.4, 12);
+
+  logEvent('combat', 'Royale: four colonies, one food source');
+}
+
+// Regicide: Two colonies — kill the enemy queen to win
+function scenarioRegicide() {
+  clearAll();
+  numAntsPerNest = 200;
+  document.getElementById('valAnts').textContent = numAntsPerNest;
+
+  addNestAt(W * 0.15, H * 0.5);
+  addNestAt(W * 0.85, H * 0.5);
+
+  // Abundant food for both sides — this is about war, not scarcity
+  placeFood(W * 0.3, H * 0.3, 25, 1);
+  placeFood(W * 0.3, H * 0.7, 25, 1);
+  placeFood(W * 0.7, H * 0.3, 25, 1);
+  placeFood(W * 0.7, H * 0.7, 25, 1);
+  placeFood(W * 0.5, H * 0.5, 30, 2); // fruit in center — high value
+
+  // Rock barriers creating lanes
+  placeRock(W * 0.5, H * 0.2, 20);
+  placeRock(W * 0.5, H * 0.8, 20);
+  placeRock(W * 0.35, H * 0.5, 12);
+  placeRock(W * 0.65, H * 0.5, 12);
+
+  logEvent('combat', 'Regicide: destroy the enemy queen!');
+}
+
+// Nocturnal: Night falls, spiders everywhere, one colony must survive
+function scenarioNocturnal() {
+  clearAll();
+  dayTime = 0.05; // night
+  addNestAt(W * 0.5, H * 0.5);
+
+  // Food scattered but sparse
+  for (let i = 0; i < 8; i++) {
+    placeFood(
+      W * (0.15 + Math.random() * 0.7),
+      H * (0.15 + Math.random() * 0.7),
+      12 + Math.random() * 10
+    );
+  }
+
+  // Many spiders
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2 + Math.random() * 0.5;
+    const dist = 0.2 + Math.random() * 0.15;
+    spiders.push(createSpider(
+      W * 0.5 + Math.cos(angle) * W * dist,
+      H * 0.5 + Math.sin(angle) * H * dist
+    ));
+  }
+
+  placeRock(W * 0.3, H * 0.3, 14);
+  placeRock(W * 0.7, H * 0.7, 14);
+
+  // Add a beetle for extra danger
+  beetles.push(createBeetle(W * 0.15, H * 0.15));
+
+  logEvent('predator', 'Nocturnal: survive the night! Spiders and a beetle are hunting...');
+}
+
+// Invasion: One colony vs waves of beetles from the edges
+function scenarioInvasion() {
+  clearAll();
+  addNestAt(W * 0.5, H * 0.5);
+
+  // Generous food
+  placeFood(W * 0.3, H * 0.3, 30, 1);
+  placeFood(W * 0.7, H * 0.3, 30, 1);
+  placeFood(W * 0.3, H * 0.7, 30, 0);
+  placeFood(W * 0.7, H * 0.7, 30, 0);
+  placeFood(W * 0.5, H * 0.2, 20, 2);
+  placeFood(W * 0.5, H * 0.8, 20, 2);
+
+  // Beetles from all edges
+  beetles.push(createBeetle(20, H * 0.3));
+  beetles.push(createBeetle(20, H * 0.7));
+  beetles.push(createBeetle(W - 20, H * 0.5));
+  beetles.push(createBeetle(W * 0.5, 20));
+
+  // Defensive rocks near nest
+  placeRock(W * 0.4, H * 0.4, 10);
+  placeRock(W * 0.6, H * 0.4, 10);
+  placeRock(W * 0.4, H * 0.6, 10);
+  placeRock(W * 0.6, H * 0.6, 10);
+
+  logEvent('predator', 'Invasion: beetles from all directions! Defend the queen!');
+}
+
+// Monsoon: Two colonies, periodic rain with puddles, limited high ground
+function scenarioMonsoon() {
+  clearAll();
+
+  // High ground: rock platforms for safety
+  placeRock(W * 0.25, H * 0.3, 20);
+  placeRock(W * 0.75, H * 0.7, 20);
+  placeRock(W * 0.5, H * 0.5, 12);
+
+  // Nests on elevated positions (near rocks)
+  addNestAt(W * 0.25, H * 0.45);
+  addNestAt(W * 0.75, H * 0.55);
+
+  // Food scattered in low areas (vulnerable to flooding)
+  placeFood(W * 0.5, H * 0.2, 25, 0);
+  placeFood(W * 0.5, H * 0.8, 25, 0);
+  placeFood(W * 0.15, H * 0.7, 20, 1);
+  placeFood(W * 0.85, H * 0.3, 20, 1);
+  placeFood(W * 0.5, H * 0.5, 15, 2);
+
+  // Schedule periodic rain
+  let monsoonCount = 0;
+  const monsoonInterval = setInterval(() => {
+    monsoonCount++;
+    if (monsoonCount > 6 || nests.length === 0) {
+      clearInterval(monsoonInterval);
+      return;
+    }
+    triggerRain();
+  }, 12000); // Rain every 12 seconds
+
+  logEvent('weather', 'Monsoon season! Rain every 12 seconds. Grab food between storms!');
+}
+
+// === WEATHER EVENTS ===
+let rainDrops = [];
+let ripples = [];
+let quakeTimer = 0;
+
+let isRaining = false;
+let rainIntensity = 0; // 0-1, for rendering
+
+function triggerRain() {
+  if (isRaining) return;
+  isRaining = true;
+  logEvent('weather', 'Rain! Puddles forming, trails washing away...');
+
+  // Generate puddle seed points — low areas where water collects
+  const puddleCenters = [];
+  const numPuddles = 3 + Math.floor(Math.random() * 5);
+  for (let p = 0; p < numPuddles; p++) {
+    puddleCenters.push({
+      x: Math.floor(Math.random() * (GW - 4)) + 2,
+      y: Math.floor(Math.random() * (GH - 4)) + 2,
+      r: 3 + Math.floor(Math.random() * 6),
+      depth: 0.4 + Math.random() * 0.6,
+    });
+  }
+
+  let rainTicks = 0;
+  const rainDuration = 120; // ~6 seconds
+  const rainInterval = setInterval(() => {
+    rainTicks++;
+    rainIntensity = Math.min(1, rainTicks / 20);
+    if (rainTicks > rainDuration - 20) rainIntensity = Math.max(0, (rainDuration - rainTicks) / 20);
+
+    // Spawn rain drops for visual
+    const dropCount = Math.floor(15 + rainIntensity * 25);
+    for (let i = 0; i < dropCount; i++) {
+      rainDrops.push({
+        x: Math.random() * W,
+        y: -10,
+        speed: 8 + Math.random() * 6,
+        length: 10 + Math.random() * 15,
+        life: 60 + Math.random() * 40,
+      });
+    }
+
+    // Wash pheromones
+    const washRate = 0.94;
+    for (const nest of nests) {
+      for (let i = 0; i < nest.homePh.length; i++) {
+        nest.homePh[i] *= washRate;
+        nest.foodPh[i] *= washRate;
+      }
+    }
+    for (let i = 0; i < alarmPh.length; i++) alarmPh[i] *= 0.87;
+
+    // Grow puddles around seed points
+    if (rainTicks < rainDuration - 10) {
+      for (const pc of puddleCenters) {
+        for (let dy = -pc.r; dy <= pc.r; dy++) {
+          for (let dx = -pc.r; dx <= pc.r; dx++) {
+            const gx = pc.x + dx, gy = pc.y + dy;
+            if (!inBounds(gx, gy) || walls[idx(gx, gy)]) continue;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > pc.r) continue;
+            const falloff = 1 - dist / pc.r;
+            const target = pc.depth * falloff;
+            const ci = idx(gx, gy);
+            puddles[ci] = Math.min(1, puddles[ci] + target * 0.02);
+            // Wash away food in deep puddles
+            if (puddles[ci] > 0.5 && food[ci] > 0) {
+              food[ci] = Math.max(0, food[ci] - 0.1);
+              if (food[ci] <= 0) totalFood--;
+            }
+          }
+        }
+      }
+    }
+
+    if (rainTicks > rainDuration) {
+      clearInterval(rainInterval);
+      isRaining = false;
+      rainIntensity = 0;
+    }
+  }, 50);
+}
+
+function triggerFoodDrop() {
+  logEvent('birth', 'Food drop! Bounty from above!');
+  const numDrops = 5 + Math.floor(Math.random() * 5);
+  for (let d = 0; d < numDrops; d++) {
+    const fx = W * (0.1 + Math.random() * 0.8);
+    const fy = H * (0.1 + Math.random() * 0.8);
+    const r = 10 + Math.random() * 15;
+    const dropType = Math.random() < 0.15 ? 2 : Math.random() < 0.4 ? 1 : 0;
+    placeFood(fx, fy, r, dropType);
+    // Visual burst
+    for (let p = 0; p < 8; p++) {
+      particles.push({
+        x: fx, y: fy,
+        vx: (Math.random() - 0.5) * 5,
+        vy: (Math.random() - 0.5) * 5,
+        life: 25, maxLife: 25, type: 'food',
+      });
+    }
+  }
+}
+
+function triggerQuake() {
+  logEvent('combat', 'Earthquake! The ground shifts...');
+  quakeTimer = 30; // frames of screen shake
+
+  // Scatter some ants randomly
+  for (const ant of ants) {
+    if (Math.random() < 0.3) {
+      ant.x += (Math.random() - 0.5) * 30;
+      ant.y += (Math.random() - 0.5) * 30;
+      ant.x = Math.max(5, Math.min(W - 5, ant.x));
+      ant.y = Math.max(5, Math.min(H - 5, ant.y));
+      ant.angle += (Math.random() - 0.5) * Math.PI;
+    }
+  }
+
+  // Break some rocks
+  for (let i = 0; i < walls.length; i++) {
+    if (walls[i] && Math.random() < 0.15) {
+      walls[i] = 0;
+    }
+  }
+
+  // Shift some food
+  const foodCells = [];
+  for (let i = 0; i < food.length; i++) {
+    if (food[i] > 0) foodCells.push(i);
+  }
+  for (const i of foodCells) {
+    if (Math.random() < 0.2) {
+      const y = Math.floor(i / GW);
+      const x = i % GW;
+      const nx = x + Math.floor((Math.random() - 0.5) * 6);
+      const ny = y + Math.floor((Math.random() - 0.5) * 6);
+      if (inBounds(nx, ny) && !walls[idx(nx, ny)]) {
+        food[idx(nx, ny)] += food[i];
+        food[i] = 0;
+      }
+    }
+  }
+}
+
+// === POPULATION CHART ===
+const POP_HISTORY_LEN = 120; // 2 minutes of data (sampled every second)
+const popHistory = []; // array of { tick, counts: { nestId: count } }
+
+function samplePopulation() {
+  const counts = {};
+  for (const a of ants) {
+    counts[a.nestId] = (counts[a.nestId] || 0) + 1;
+  }
+  popHistory.push({ tick: simTick, counts });
+  if (popHistory.length > POP_HISTORY_LEN) popHistory.shift();
+}
+
+function renderPopChart() {
+  const chart = document.getElementById('popChart');
+  if (!chart) return;
+  const cctx = chart.getContext('2d');
+  const cw = chart.width, ch = chart.height;
+  cctx.fillStyle = '#0f0f14';
+  cctx.fillRect(0, 0, cw, ch);
+
+  if (popHistory.length < 2) return;
+
+  // Find max population for scaling
+  let maxPop = 10;
+  for (const entry of popHistory) {
+    for (const c of Object.values(entry.counts)) {
+      if (c > maxPop) maxPop = c;
+    }
+  }
+
+  // Draw line for each colony
+  for (const nest of nests) {
+    const c = nest.colour;
+    cctx.strokeStyle = c.carry;
+    cctx.lineWidth = 1.5;
+    cctx.beginPath();
+    for (let i = 0; i < popHistory.length; i++) {
+      const x = (i / (POP_HISTORY_LEN - 1)) * cw;
+      const count = popHistory[i].counts[nest.id] || 0;
+      const y = ch - (count / maxPop) * (ch - 4) - 2;
+      if (i === 0) cctx.moveTo(x, y);
+      else cctx.lineTo(x, y);
+    }
+    cctx.stroke();
+  }
+}
+
+// === AMBIENT SOUND ENGINE ===
+let audioCtx = null;
+let soundEnabled = false;
+let masterGain = null;
+let ambientOsc = null;
+let combatSynth = null;
+let lastCombatSound = 0;
+let lastFoodSound = 0;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.15;
+  masterGain.connect(audioCtx.destination);
+
+  // Ambient drone — low hum representing colony activity
+  ambientOsc = audioCtx.createOscillator();
+  ambientOsc.type = 'sine';
+  ambientOsc.frequency.value = 55; // low A
+  const ambientGain = audioCtx.createGain();
+  ambientGain.gain.value = 0.08;
+
+  // Filter for warmth
+  const ambientFilter = audioCtx.createBiquadFilter();
+  ambientFilter.type = 'lowpass';
+  ambientFilter.frequency.value = 200;
+
+  ambientOsc.connect(ambientFilter);
+  ambientFilter.connect(ambientGain);
+  ambientGain.connect(masterGain);
+  ambientOsc.start();
+
+  // Second harmonic
+  const osc2 = audioCtx.createOscillator();
+  osc2.type = 'sine';
+  osc2.frequency.value = 82.5; // fifth above
+  const g2 = audioCtx.createGain();
+  g2.gain.value = 0.04;
+  osc2.connect(ambientFilter);
+  g2.connect(masterGain);
+  osc2.start();
+}
+
+function toggleSound() {
+  if (!soundEnabled) {
+    initAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    soundEnabled = true;
+    document.getElementById('soundToggle').textContent = 'Sound: On';
+    document.getElementById('soundToggle').style.color = '#b0a080';
+  } else {
+    soundEnabled = false;
+    if (audioCtx) audioCtx.suspend();
+    document.getElementById('soundToggle').textContent = 'Sound: Off';
+    document.getElementById('soundToggle').style.color = '#6a5a40';
+  }
+}
+
+function playCombatSound() {
+  if (!soundEnabled || !audioCtx) return;
+  const now = audioCtx.currentTime;
+  if (now - lastCombatSound < 0.15) return;
+  lastCombatSound = now;
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(200 + Math.random() * 300, now);
+  osc.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+  gain.gain.setValueAtTime(0.06, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+  osc.connect(gain);
+  gain.connect(masterGain);
+  osc.start(now);
+  osc.stop(now + 0.12);
+}
+
+function playFoodSound() {
+  if (!soundEnabled || !audioCtx) return;
+  const now = audioCtx.currentTime;
+  if (now - lastFoodSound < 0.08) return;
+  lastFoodSound = now;
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(600 + Math.random() * 400, now);
+  osc.frequency.exponentialRampToValueAtTime(1200, now + 0.06);
+  gain.gain.setValueAtTime(0.03, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+  osc.connect(gain);
+  gain.connect(masterGain);
+  osc.start(now);
+  osc.stop(now + 0.08);
+}
+
+function playSpiderSound() {
+  if (!soundEnabled || !audioCtx) return;
+  const now = audioCtx.currentTime;
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(500, now);
+  osc.frequency.exponentialRampToValueAtTime(60, now + 0.25);
+  gain.gain.setValueAtTime(0.08, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+  osc.connect(gain);
+  gain.connect(masterGain);
+  osc.start(now);
+  osc.stop(now + 0.3);
+}
+
+function playQueenDeathSound() {
+  if (!soundEnabled || !audioCtx) return;
+  const now = audioCtx.currentTime;
+  // Dramatic descending tone
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(800, now);
+  osc.frequency.exponentialRampToValueAtTime(100, now + 0.8);
+  gain.gain.setValueAtTime(0.12, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
+  osc.connect(gain);
+  gain.connect(masterGain);
+  osc.start(now);
+  osc.stop(now + 1.0);
+  // Second harmonic for richness
+  const osc2 = audioCtx.createOscillator();
+  const gain2 = audioCtx.createGain();
+  osc2.type = 'triangle';
+  osc2.frequency.setValueAtTime(1200, now);
+  osc2.frequency.exponentialRampToValueAtTime(150, now + 0.6);
+  gain2.gain.setValueAtTime(0.06, now);
+  gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+  osc2.connect(gain2);
+  gain2.connect(masterGain);
+  osc2.start(now);
+  osc2.stop(now + 0.7);
+}
+
+// Update ambient drone pitch based on colony activity
+function updateAmbientAudio() {
+  if (!soundEnabled || !audioCtx || !ambientOsc) return;
+  const totalAnts = ants.length;
+  const dayPhase = getDayPhase();
+  // Pitch rises slightly with more ants, drops at night
+  const nightDrop = dayPhase.nightAmount * 15; // lower pitch at night
+  const basePitch = 55 + Math.min(totalAnts * 0.05, 30) - nightDrop;
+  ambientOsc.frequency.setTargetAtTime(Math.max(35, basePitch), audioCtx.currentTime, 0.5);
+  // Volume slightly lower at night — quieter world
+  if (masterGain) {
+    const nightVol = 0.15 - dayPhase.nightAmount * 0.04;
+    masterGain.gain.setTargetAtTime(nightVol, audioCtx.currentTime, 0.5);
+  }
+}
+
+// === TIME UI ===
+let lastPhase = '';
+function updateTimeUI() {
+  const day = getDayPhase();
+  const icon = document.getElementById('timeIcon');
+  const bar = document.getElementById('timeBar');
+  const name = document.getElementById('timeName');
+
+  if (day.phase === 'Night') {
+    icon.textContent = '\u{1F319}'; // crescent moon
+    bar.style.background = '#3040608a';
+  } else if (day.phase === 'Dawn') {
+    icon.textContent = '\u{1F305}'; // sunrise
+    bar.style.background = 'linear-gradient(90deg, #304060, #d48040)';
+  } else if (day.phase === 'Dusk') {
+    icon.textContent = '\u{1F307}'; // sunset
+    bar.style.background = 'linear-gradient(90deg, #d48040, #304060)';
+  } else {
+    icon.textContent = '\u2600'; // sun
+    bar.style.background = '#d4a050';
+  }
+  bar.style.width = (dayTime * 100) + '%';
+  name.textContent = day.phase;
+
+  // Log phase transitions
+  if (dayNightEnabled && day.phase !== lastPhase && lastPhase) {
+    if (day.phase === 'Night') logEvent('weather', 'Night falls — ants slow, spiders stir');
+    else if (day.phase === 'Dawn') logEvent('weather', 'Dawn breaks — the colony awakens');
+    else if (day.phase === 'Day') logEvent('weather', 'Daylight — full foraging speed');
+    else if (day.phase === 'Dusk') logEvent('weather', 'Dusk — darkness approaches');
+  }
+  lastPhase = day.phase;
+}
+
+// === MAIN LOOP ===
+let lastTime = performance.now();
+let frameCount = 0;
+let fpsDisplay = 0;
+let cachedDaySpeedMod = 1;
+let cachedNightAmount = 0;
+
+function loop() {
+  if (document.hidden) { requestAnimationFrame(loop); return; }
+
+  // Advance day/night cycle
+  if (dayNightEnabled) {
+    dayTime = (dayTime + DAY_CYCLE_RATE * daySpeed) % 1;
+  }
+  // Cache day/night values for this frame
+  const _dp = getDayPhase();
+  cachedNightAmount = _dp.nightAmount;
+  cachedDaySpeedMod = cachedNightAmount > 0.5 ? (0.6 + 0.4 * (1 - cachedNightAmount)) : 1.0;
+
+  for (let s = 0; s < simSpeed; s++) {
+    simTick++;
+
+    // Build spatial hash for combat
+    if (nests.length > 1 || spiders.length > 0 || beetles.length > 0) buildSpatialHash();
+
+    // Update ants (iterate backwards for safe removal)
+    for (let i = ants.length - 1; i >= 0; i--) {
+      if (i < ants.length) updateAnt(ants[i], i);
+    }
+
+    if ((simTick) % 2 === 0) updatePheromones();
+    if (foodRegrowth) regrowFood();
+    // Fruit decay — every 60 ticks, rot fruit slightly
+    if (simTick % 60 === 0) {
+      for (let fi = 0; fi < food.length; fi++) {
+        if (food[fi] > 0 && foodType[fi] === 2) {
+          food[fi] -= 0.3;
+          if (food[fi] <= 0) { food[fi] = 0; totalFood--; }
+        }
+      }
+    }
+
+    // Puddle evaporation + pheromone erosion in puddles
+    if (simTick % 4 === 0) {
+      const evapFactor = isRaining ? 0.999 : 0.994;
+      for (let pi = 0; pi < puddles.length; pi++) {
+        if (puddles[pi] > 0.01) {
+          puddles[pi] *= evapFactor;
+          if (puddles[pi] < 0.01) { puddles[pi] = 0; continue; }
+          // Puddles erode pheromone trails within them
+          if (puddles[pi] > 0.2) {
+            for (const nest of nests) {
+              nest.homePh[pi] *= 0.95;
+              nest.foodPh[pi] *= 0.95;
+            }
+          }
+        }
+      }
+    }
+
+    // Population dynamics
+    updatePopulation();
+
+    // Check for eliminated colonies (queenless + no ants left)
+    if (simTick % 60 === 0) {
+      for (let ni = nests.length - 1; ni >= 0; ni--) {
+        const n = nests[ni];
+        if (!n.queenless) continue;
+        let count = 0;
+        for (const a of ants) if (a.nestId === n.id) count++;
+        if (count === 0) {
+          logEvent('death', `${n.colour.name} colony has been eliminated!`);
+          nestMap.delete(n.id);
+          nests.splice(ni, 1);
+          updateLegend();
+        }
+      }
+    }
+
+    // Spiders
+    for (const spider of spiders) updateSpider(spider);
+
+    // Beetles
+    for (const beetle of beetles) updateBeetle(beetle);
+
+    // Particles
+    updateParticles();
+  }
+
+  render();
+
+  frameCount++;
+  const now = performance.now();
+  if (now - lastTime > 1000) {
+    fpsDisplay = Math.round(frameCount * 1000 / (now - lastTime));
+    frameCount = 0;
+    lastTime = now;
+
+    // Update legend & charts
+    updateLegend();
+    renderEventLog();
+    samplePopulation();
+    renderPopChart();
+    updateAmbientAudio();
+    updateTimeUI();
+  }
+
+  document.getElementById('antCount').textContent = ants.length;
+  document.getElementById('foodRemaining').textContent = totalFood;
+  document.getElementById('fps').textContent = fpsDisplay;
+
+  requestAnimationFrame(loop);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { lastTime = performance.now(); frameCount = 0; }
+});
+
+initGrids();
+setupDefault();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
