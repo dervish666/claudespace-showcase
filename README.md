@@ -10,7 +10,7 @@ All projects follow the same minimal pattern: a Python `ThreadingHTTPServer` + a
 
 ### Games & simulations
 
-- **[settlers](projects/settlers/)** — resource-management village builder inspired by Settlers 2 (Blue Byte, 1996). 21 building types, production chains, population & happiness, procedural rivers, day/night cycle, save/load. ~3600 lines.
+- **[settlers](projects/settlers/)** — resource-management village builder inspired by Settlers 2 (Blue Byte, 1996). 21 building types, production chains, population & happiness, procedural rivers, day/night cycle, save/load. Isometric terrain relief with slope shading and baked texture patterns, supersampled procedural building sprites with distinct per-type silhouettes (round windmill tower, open sawmill shed, thatched longhouse, mine portals, crenellated watchtower), seasonal crossfades. ~5600 lines.
 - **[tower](projects/tower/)** — Sim Tower-style high-rise builder with noise propagation, named residents who develop stress from bad neighbours or slow elevators, a LOOK-algorithm elevator scheduler, and 3 basement parking floors. ~2000 lines, 10 modules.
 - **[ants](projects/ants/)** — pheromone-based ant colony simulator: queens, colony splitting, puddles that drown ants and wash pheromones, beetles, spiders, 9 scenarios, ant highways.
 - **[sandbox](projects/sandbox/)** — falling-sand toy with 36 materials and mixing reactions. Moss grows on stone, soap dissolves in acid, fairy dust turns water rainbow. Touch-friendly.
