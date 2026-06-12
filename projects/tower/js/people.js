@@ -50,7 +50,8 @@ export function tickPeople(state) {
     spawnWorkers(state, hour);
     tickVisitors(state, hour);
     // Track leaves-due-to-stress per condo per day
-    if (!state._stressLeaveToday) state._stressLeaveToday = new Map();
+    // (instanceof check matters: a loaded save turns the Map into a plain {})
+    if (!(state._stressLeaveToday instanceof Map)) state._stressLeaveToday = new Map();
     if (!state._stressLeaveDay) state._stressLeaveDay = state.clock.day;
     if (state.clock.day !== state._stressLeaveDay) {
         state._stressLeaveToday = new Map();

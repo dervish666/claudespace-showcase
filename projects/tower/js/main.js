@@ -63,7 +63,12 @@ function init() {
     function loop(timestamp) {
         if (hidden) { requestAnimationFrame(loop); return; }
         if (timestamp - lastTime >= FRAME_MS) {
-            update(timestamp - lastTime);
+            // a sim exception must not kill the loop and blank the screen
+            try {
+                update(timestamp - lastTime);
+            } catch (e) {
+                console.error('update() failed:', e);
+            }
             render(ctx, state);
             lastTime = timestamp;
         }

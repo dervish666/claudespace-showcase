@@ -35,7 +35,8 @@ export function clearSave() {
 }
 
 function serializeState(state) {
-    const { roomsById, ...rest } = state; // exclude Map (rebuilt on load)
+    // exclude Maps: roomsById is rebuilt on load, _stressLeaveToday is transient
+    const { roomsById, _stressLeaveToday, ...rest } = state;
     return {
         ...rest,
         elevators: state.elevators.map(e => ({
