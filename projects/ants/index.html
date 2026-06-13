@@ -188,6 +188,78 @@ function resize() {
   H = canvas.height = window.innerHeight;
   GW = Math.ceil(W / CELL);
   GH = Math.ceil(H / CELL);
+  bakeTerrain();
+}
+
+// === TERRAIN (baked once per resize) — naturalistic sunlit soil ===
+let terrainCanvas = null;
+function _thash(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = ((h ^ (h >> 13)) * 1274126177) | 0;
+  return ((h ^ (h >> 16)) >>> 0) / 4294967295;
+}
+function bakeTerrain() {
+  if (!W || !H) return;
+  terrainCanvas = document.createElement('canvas');
+  terrainCanvas.width = W;
+  terrainCanvas.height = H;
+  const tctx = terrainCanvas.getContext('2d');
+  const img = tctx.createImageData(W, H);
+  const d = img.data;
+  // coarse smooth lattices for large-scale dry/damp patches + mottling
+  const CW = 40, CH = 26;
+  const patch = new Float32Array(CW * CH);
+  const mott = new Float32Array(CW * CH);
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
+    patch[j * CW + i] = _thash(i, j);
+    mott[j * CW + i] = _thash(i + 100, j + 100);
+  }
+  for (let y = 0; y < H; y++) {
+    const gy = (y / H) * (CH - 1), yi = gy | 0, yf = gy - yi;
+    const yi1 = yi + 1 < CH ? yi + 1 : yi, v = yf * yf * (3 - 2 * yf);
+    for (let x = 0; x < W; x++) {
+      const gx = (x / W) * (CW - 1), xi = gx | 0, xf = gx - xi;
+      const xi1 = xi + 1 < CW ? xi + 1 : xi, u = xf * xf * (3 - 2 * xf);
+      // bilinear sample patch + mottle
+      const p = (patch[yi * CW + xi] * (1 - u) + patch[yi * CW + xi1] * u) * (1 - v)
+              + (patch[yi1 * CW + xi] * (1 - u) + patch[yi1 * CW + xi1] * u) * v;
+      const m = (mott[yi * CW + xi] * (1 - u) + mott[yi * CW + xi1] * u) * (1 - v)
+              + (mott[yi1 * CW + xi] * (1 - u) + mott[yi1 * CW + xi1] * u) * v;
+      const grain = _thash(x, y);
+      let r = 110, g = 84, b = 56;          // base sunlit soil
+      const dry = p - 0.5;                    // dry/sandy (light) vs damp (dark)
+      r += dry * 58; g += dry * 46; b += dry * 28;
+      const mo = (m - 0.5) * 26;              // broad mottling
+      r += mo; g += mo * 0.8; b += mo * 0.6;
+      const gr = (grain - 0.5) * 22;          // fine speckle
+      r += gr; g += gr * 0.9; b += gr * 0.75;
+      const o = (y * W + x) << 2;
+      d[o]   = r < 0 ? 0 : r > 255 ? 255 : r;
+      d[o + 1] = g < 0 ? 0 : g > 255 ? 255 : g;
+      d[o + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
+      d[o + 3] = 255;
+    }
+  }
+  tctx.putImageData(img, 0, 0);
+  // scattered pebbles (shadow + body + highlight)
+  const pebbles = Math.floor(W * H / 11000);
+  for (let i = 0; i < pebbles; i++) {
+    const px = Math.random() * W, py = Math.random() * H, pr = 1.5 + Math.random() * 3.2;
+    tctx.fillStyle = 'rgba(0,0,0,0.16)';
+    tctx.beginPath(); tctx.ellipse(px + pr * 0.45, py + pr * 0.5, pr, pr * 0.7, 0, 0, Math.PI * 2); tctx.fill();
+    const sh = 78 + Math.random() * 54;
+    tctx.fillStyle = `rgb(${sh | 0},${(sh - 10) | 0},${(sh - 22) | 0})`;
+    tctx.beginPath(); tctx.ellipse(px, py, pr, pr * 0.72, Math.random() * Math.PI, 0, Math.PI * 2); tctx.fill();
+    tctx.fillStyle = 'rgba(255,248,225,0.16)';
+    tctx.beginPath(); tctx.ellipse(px - pr * 0.3, py - pr * 0.32, pr * 0.42, pr * 0.3, 0, 0, Math.PI * 2); tctx.fill();
+  }
+  // organic detritus flecks (leaf litter)
+  const flecks = Math.floor(W * H / 16000);
+  for (let i = 0; i < flecks; i++) {
+    const px = Math.random() * W, py = Math.random() * H, fr = 1 + Math.random() * 2;
+    tctx.fillStyle = `rgba(${(50 + Math.random() * 30) | 0},${(40 + Math.random() * 25) | 0},${(24 + Math.random() * 16) | 0},0.5)`;
+    tctx.beginPath(); tctx.ellipse(px, py, fr, fr * 0.6, Math.random() * Math.PI, 0, Math.PI * 2); tctx.fill();
+  }
 }
 resize();
 window.addEventListener('resize', () => { resize(); initGrids(); });
@@ -1247,6 +1319,104 @@ function ensurePheromoneImage() {
   }
 }
 
+// === ANT SPRITE ATLAS (baked rotated sprites, supersampled) ===
+const ANT_ANGLES = 24, ANT_FRAMES = 2, ANT_SS = 4;
+const antAtlases = {};
+function shade(hex, amt) {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  let r = parseInt(h.substr(0,2),16), g = parseInt(h.substr(2,2),16), b = parseInt(h.substr(4,2),16);
+  if (amt >= 0) { r += (255-r)*amt; g += (255-g)*amt; b += (255-b)*amt; }
+  else { const f = 1+amt; r *= f; g *= f; b *= f; }
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
+function antMetrics(role) {
+  if (role === 'queen')   return { L: 13,  R: 12 };
+  if (role === 'soldier') return { L: 8.5, R: 9 };
+  if (role === 'scout')   return { L: 6.5, R: 8 };
+  return { L: 6, R: 7 }; // worker
+}
+// draw one ant in local space, centred at origin, pointing +x, in world units
+function drawAntLocal(g, L, role, bodyHex, frame) {
+  const dark = shade(bodyHex, -0.55), lite = shade(bodyHex, 0.40);
+  const isQueen = role === 'queen', isSoldier = role === 'soldier', isScout = role === 'scout';
+  // contact shadow (centred — rotation-safe)
+  g.fillStyle = 'rgba(0,0,0,0.22)';
+  g.beginPath(); g.ellipse(0, 0, L*0.62, L*0.42, 0, 0, Math.PI*2); g.fill();
+  // legs (under body) — 3 per side, tripod gait by frame
+  g.strokeStyle = dark; g.lineWidth = Math.max(0.5, L*0.085); g.lineCap = 'round';
+  const baseXs = [L*0.16, 0, -L*0.14];
+  for (let s = 0; s < 2; s++) {
+    const side = s === 0 ? 1 : -1;
+    for (let l = 0; l < 3; l++) {
+      const groupA = ((l + (side > 0 ? 0 : 1)) % 2) === 0;
+      const sw = ((frame === 0) === groupA ? 1 : -1) * L*0.14;
+      const bx = baseXs[l], by = side*L*0.10;
+      const fx = baseXs[l] + sw + (l-1)*L*0.10, fy = side*L*0.46;
+      g.beginPath(); g.moveTo(bx, by);
+      g.quadraticCurveTo((bx+fx)/2, side*L*0.34, fx, fy); g.stroke();
+    }
+  }
+  // antennae
+  g.lineWidth = Math.max(0.4, L*0.055);
+  const aLen = isScout ? 0.44 : 0.30;
+  for (const side of [-1, 1]) {
+    g.beginPath(); g.moveTo(L*0.40, side*L*0.06);
+    g.quadraticCurveTo(L*0.55, side*L*0.10, L*(0.40+aLen), side*L*0.26); g.stroke();
+  }
+  // body segments: gaster (rear), thorax, head
+  const segs = [
+    { x: -L*0.42, rx: L*(isQueen?0.44:0.34), ry: L*(isQueen?0.30:0.25) },
+    { x: -L*0.04, rx: L*0.20, ry: L*0.16 },
+    { x:  L*0.31, rx: L*(isSoldier?0.20:0.17), ry: L*(isSoldier?0.18:0.155) },
+  ];
+  for (const sg of segs) { g.fillStyle = bodyHex; g.beginPath(); g.ellipse(sg.x, 0, sg.rx, sg.ry, 0, 0, Math.PI*2); g.fill(); }
+  g.strokeStyle = dark; g.lineWidth = Math.max(0.4, L*0.06);
+  for (const sg of segs) { g.beginPath(); g.ellipse(sg.x, 0, sg.rx, sg.ry, 0, 0, Math.PI*2); g.stroke(); }
+  // sheen
+  g.fillStyle = lite; g.globalAlpha = 0.5;
+  g.beginPath(); g.ellipse(-L*0.45, -L*0.09, L*0.18, L*0.10, 0, 0, Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse(-L*0.04, -L*0.05, L*0.10, L*0.07, 0, 0, Math.PI*2); g.fill();
+  g.globalAlpha = 1;
+  // soldier mandibles
+  if (isSoldier) {
+    g.strokeStyle = dark; g.lineWidth = Math.max(0.5, L*0.075); g.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      g.beginPath(); g.moveTo(L*0.46, side*L*0.08);
+      g.quadraticCurveTo(L*0.62, side*L*0.03, L*0.60, side*L*0.18); g.stroke();
+    }
+  }
+  // queen crown
+  if (isQueen) {
+    g.fillStyle = '#ffe08a';
+    for (const off of [-0.18, 0, 0.18]) { g.beginPath(); g.arc(L*0.30, off*L*0.95, L*0.07, 0, Math.PI*2); g.fill(); }
+  }
+  // eyes
+  g.fillStyle = 'rgba(18,12,8,0.9)';
+  for (const side of [-1, 1]) { g.beginPath(); g.arc(L*0.34, side*L*0.07, L*0.045, 0, Math.PI*2); g.fill(); }
+}
+function getAntAtlas(key, role, bodyHex) {
+  if (antAtlases[key]) return antAtlases[key];
+  const { L, R } = antMetrics(role);
+  const cell = Math.ceil(2 * R * ANT_SS);
+  const atlas = document.createElement('canvas');
+  atlas.width = cell * ANT_ANGLES; atlas.height = cell * ANT_FRAMES;
+  const g = atlas.getContext('2d');
+  for (let f = 0; f < ANT_FRAMES; f++) {
+    for (let a = 0; a < ANT_ANGLES; a++) {
+      g.save();
+      g.translate(a*cell + cell/2, f*cell + cell/2);
+      g.scale(ANT_SS, ANT_SS);
+      g.rotate((a / ANT_ANGLES) * Math.PI * 2);
+      drawAntLocal(g, L, role, bodyHex, f);
+      g.restore();
+    }
+  }
+  const at = { canvas: atlas, cell, R };
+  antAtlases[key] = at;
+  return at;
+}
+
 function render() {
   // Screen shake for earthquake
   if (quakeTimer > 0) {
@@ -1256,8 +1426,12 @@ function render() {
 
   const day = getDayPhase();
   const bgR = day.groundR, bgG = day.groundG, bgB = day.groundB;
-  ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
-  ctx.fillRect(0, 0, W, H);
+  if (terrainCanvas) {
+    ctx.drawImage(terrainCanvas, 0, 0);
+  } else {
+    ctx.fillStyle = `rgb(${bgR},${bgG},${bgB})`;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   // Sky gradient during dawn/dusk
   if (day.phase === 'Dawn' || day.phase === 'Dusk') {
@@ -1284,6 +1458,7 @@ function render() {
 
   ensurePheromoneImage();
   const data = pheromoneImage.data;
+  const foodDraw = []; // collected during the per-cell pass, drawn as morsels after blit
 
   for (let y = 0; y < GH; y++) {
     for (let x = 0; x < GW; x++) {
@@ -1296,13 +1471,10 @@ function render() {
         continue;
       }
       if (food[i] > 0) {
-        const foodGlow = 1 + day.nightAmount * 0.5;
-        const ft = FOOD_TYPES[foodType[i]] || FOOD_TYPES[0];
-        const intensity = Math.min(1, 0.4 + food[i] * 0.12);
-        data[pi]   = Math.min(255, ft.color[0] * intensity * foodGlow);
-        data[pi+1] = Math.min(255, ft.color[1] * intensity * foodGlow);
-        data[pi+2] = Math.min(255, ft.color[2] * intensity * foodGlow);
-        data[pi+3] = 255;
+        // drawn as illustrated morsels after the blit; keep the grid cell clear
+        // (subsample 1-in-9 cells — morsels are larger than the cell, so the pile stays dense)
+        if (x % 3 === 0 && y % 3 === 0) foodDraw.push(x, y, food[i], foodType[i]);
+        data[pi] = 0; data[pi+1] = 0; data[pi+2] = 0; data[pi+3] = 0;
         continue;
       }
 
@@ -1369,16 +1541,17 @@ function render() {
           r += 200 * ai; g += 30 * ai; b += 30 * ai;
         }
         if (any) {
+          // translucent colour sheen — soft by day, vivid/glowing by night
+          const strength = Math.min(1, Math.max(r, g, b) / 200);
           data[pi] = Math.min(255, r);
           data[pi+1] = Math.min(255, g);
           data[pi+2] = Math.min(255, b);
-          data[pi+3] = 255;
+          data[pi+3] = Math.floor(strength * (110 + day.nightAmount * 130));
         } else if (trailWear[i] > 0.5) {
+          // worn path — packed lighter earth, blends softly over terrain
           const w = Math.min(1, trailWear[i] / 20);
-          data[pi] = Math.floor(bgR + w * 12);
-          data[pi+1] = Math.floor(bgG + w * 10);
-          data[pi+2] = Math.floor(bgB + w * 6);
-          data[pi+3] = 255;
+          data[pi] = 150; data[pi+1] = 122; data[pi+2] = 90;
+          data[pi+3] = Math.floor(w * 85);
         } else {
           data[pi] = 0; data[pi+1] = 0; data[pi+2] = 0; data[pi+3] = 0;
         }
@@ -1391,6 +1564,41 @@ function render() {
   octx.putImageData(pheromoneImage, 0, 0);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(offscreen, 0, 0, W, H);
+
+  // === Illustrated food morsels — leaves (crumbs) / seeds / berries (fruit) ===
+  for (let k = 0; k < foodDraw.length; k += 4) {
+    const amt = foodDraw[k+2];
+    if (amt <= 0) continue;
+    const gx = foodDraw[k], gy = foodDraw[k+1], typ = foodDraw[k+3];
+    const scale = 0.85 + Math.min(1, amt * 0.12) * 1.05;
+    const hsh = ((gx * 131 + gy * 73) & 255) / 255;
+    const cx = gx * CELL + (hsh - 0.5) * 2.4;
+    const cy = gy * CELL + (((hsh * 977) % 1) - 0.5) * 2.4;
+    const rot = hsh * Math.PI * 2;
+    const cR = Math.cos(rot), sR = Math.sin(rot);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath(); ctx.ellipse(cx + 0.6, cy + 0.8, 2.4 * scale, 1.7 * scale, 0, 0, Math.PI * 2); ctx.fill();
+    if (typ === 0) {            // leaf (rotated ellipses — no save/restore)
+      ctx.fillStyle = '#3f9a2a';
+      ctx.beginPath(); ctx.ellipse(cx, cy, 3.0 * scale, 1.7 * scale, rot, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#5fc23f';
+      ctx.beginPath(); ctx.ellipse(cx - cR * 0.4 * scale, cy - sR * 0.4 * scale, 2.0 * scale, 0.9 * scale, rot, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(30,80,20,0.7)'; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(cx - cR * 2.6 * scale, cy - sR * 2.6 * scale); ctx.lineTo(cx + cR * 2.6 * scale, cy + sR * 2.6 * scale); ctx.stroke();
+    } else if (typ === 1) {     // seed
+      ctx.fillStyle = '#c9a23a';
+      ctx.beginPath(); ctx.ellipse(cx, cy, 2.6 * scale, 1.6 * scale, rot, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#e8c863';
+      ctx.beginPath(); ctx.ellipse(cx, cy, 1.4 * scale, 0.7 * scale, rot, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(120,80,20,0.8)';
+      ctx.beginPath(); ctx.arc(cx + cR * 2.0 * scale, cy + sR * 2.0 * scale, 0.7 * scale, 0, Math.PI * 2); ctx.fill();
+    } else {                    // berry
+      ctx.fillStyle = '#c8362c';
+      ctx.beginPath(); ctx.arc(cx, cy, 2.6 * scale, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,150,120,0.7)';
+      ctx.beginPath(); ctx.arc(cx - 0.8 * scale, cy - 0.9 * scale, 1.0 * scale, 0, Math.PI * 2); ctx.fill();
+    }
+  }
 
   // Draw puddles as translucent blue overlay
   let hasPuddles = false;
@@ -1591,6 +1799,20 @@ function render() {
     }
   }
 
+  // === NIGHT LIGHTING — darken ground & bugs; trails glow bioluminescent ===
+  // (nests / ants / queen glow / fireflies draw after this, so they stay bright)
+  if (day.nightAmount > 0.01) {
+    ctx.fillStyle = `rgba(10,14,34,${day.nightAmount * 0.62})`;
+    ctx.fillRect(0, 0, W, H);
+    if (day.nightAmount > 0.15) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = day.nightAmount * 0.55;
+      ctx.drawImage(offscreen, 0, 0, W, H);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+
   // Draw nests — glow more at night
   const nestGlowR = day.nightAmount > 0.3 ? 24 + day.nightAmount * 16 : 24;
   for (const nest of nests) {
@@ -1672,111 +1894,50 @@ function render() {
     }
   }
 
-  // Draw ants with role distinction
+  // Draw ants — baked rotated sprite atlas (getAntAtlas / drawAntLocal)
   for (const ant of ants) {
     const nest = getNest(ant.nestId);
     if (!nest) continue;
     const c = nest.colour;
-    const role = ROLES[ant.role];
-    const sz = role.size;
 
-    // Colour based on role and state
-    let colour;
-    if (ant.role === 'queen') {
-      colour = c.queen;
-    } else if (ant.hasFood) {
-      colour = c.carry;
-    } else if (ant.role === 'soldier') {
-      colour = c.soldier;
-    } else if (ant.role === 'scout') {
-      colour = c.scout;
-    } else {
-      colour = c.body;
-    }
-
-    // Queen glow aura
+    // Queen glow aura + founding ring (dynamic)
     if (ant.role === 'queen') {
       const pulse = 0.3 + Math.sin(simTick * 0.05) * 0.1;
-      const grad = ctx.createRadialGradient(ant.x, ant.y, 2, ant.x, ant.y, 14);
+      const grad = ctx.createRadialGradient(ant.x, ant.y, 2, ant.x, ant.y, 16);
       grad.addColorStop(0, `rgba(255,220,100,${pulse})`);
       grad.addColorStop(1, 'rgba(255,200,50,0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(ant.x, ant.y, 14, 0, Math.PI * 2);
+      ctx.arc(ant.x, ant.y, 16, 0, Math.PI * 2);
       ctx.fill();
       if (ant.founding) {
-        // Founding queen gets a ring marker
         ctx.strokeStyle = `rgba(255,220,100,${0.4 + Math.sin(simTick * 0.1) * 0.2})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(ant.x, ant.y, 10, 0, Math.PI * 2);
+        ctx.arc(ant.x, ant.y, 11, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
 
-    ctx.fillStyle = colour;
+    const bodyHex = ant.role === 'queen' ? c.queen
+                  : ant.role === 'soldier' ? c.soldier
+                  : ant.role === 'scout' ? c.scout : c.body;
+    const at = getAntAtlas(c.name + '_' + ant.role, ant.role, bodyHex);
+    const cell = at.cell, drawSize = cell / ANT_SS;
+    let aB = Math.round(ant.angle / (Math.PI * 2) * ANT_ANGLES) % ANT_ANGLES;
+    if (aB < 0) aB += ANT_ANGLES;
+    const frame = (Math.floor(simTick * 0.4 + (ant.x + ant.y) * 0.25) & 1);
+    ctx.drawImage(at.canvas, aB * cell, frame * cell, cell, cell,
+                  ant.x - drawSize / 2, ant.y - drawSize / 2, drawSize, drawSize);
 
-    // Body
-    ctx.beginPath();
-    ctx.ellipse(ant.x, ant.y, 2.5 * sz, 1.5 * sz, ant.angle, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Queen abdomen (extra large rear segment)
-    if (ant.role === 'queen') {
-      const abx = ant.x - Math.cos(ant.angle) * 4;
-      const aby = ant.y - Math.sin(ant.angle) * 4;
-      ctx.fillStyle = colour;
-      ctx.beginPath();
-      ctx.ellipse(abx, aby, 3.5, 2.5, ant.angle, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Head
-    const hx = ant.x + Math.cos(ant.angle) * 2.5 * sz;
-    const hy = ant.y + Math.sin(ant.angle) * 2.5 * sz;
-    ctx.beginPath();
-    ctx.arc(hx, hy, 1.2 * sz, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Queen crown (3 small dots above head)
-    if (ant.role === 'queen') {
-      ctx.fillStyle = 'rgba(255,220,80,0.9)';
-      const crownBase = ant.angle - Math.PI / 2;
-      for (const offset of [-0.4, 0, 0.4]) {
-        const cx = hx + Math.cos(crownBase + offset) * 3.5;
-        const cy = hy + Math.sin(crownBase + offset) * 3.5;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 0.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // Soldier mandibles
-    if (ant.role === 'soldier') {
-      ctx.strokeStyle = colour;
-      ctx.lineWidth = 0.8;
-      for (const side of [-0.4, 0.4]) {
-        const mx = hx + Math.cos(ant.angle + side) * 3;
-        const my = hy + Math.sin(ant.angle + side) * 3;
-        ctx.beginPath();
-        ctx.moveTo(hx, hy);
-        ctx.lineTo(mx, my);
-        ctx.stroke();
-      }
-    }
-
-    // Scout antennae (longer)
-    if (ant.role === 'scout') {
-      ctx.strokeStyle = colour;
-      ctx.lineWidth = 0.5;
-      for (const side of [-0.5, 0.5]) {
-        const ax = hx + Math.cos(ant.angle + side) * 4;
-        const ay = hy + Math.sin(ant.angle + side) * 4;
-        ctx.beginPath();
-        ctx.moveTo(hx, hy);
-        ctx.lineTo(ax, ay);
-        ctx.stroke();
-      }
+    // carried food pellet at the head
+    if (ant.hasFood) {
+      const hx = ant.x + Math.cos(ant.angle) * at.R * 0.55;
+      const hy = ant.y + Math.sin(ant.angle) * at.R * 0.55;
+      ctx.fillStyle = c.carry;
+      ctx.beginPath(); ctx.arc(hx, hy, 1.7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath(); ctx.arc(hx - 0.5, hy - 0.5, 0.7, 0, Math.PI * 2); ctx.fill();
     }
   }
 
@@ -1819,6 +1980,19 @@ function render() {
         ctx.arc(fx, fy, 8, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
+  }
+
+  // Pollen / dust motes drifting in daylight
+  if (day.nightAmount < 0.7) {
+    const dayAmt = 1 - day.nightAmount;
+    const moteCount = Math.floor(dayAmt * 18);
+    for (let mi = 0; mi < moteCount; mi++) {
+      const mx = (Math.sin(simTick * 0.004 + mi * 5.1) * 0.45 + 0.5) * W + Math.sin(simTick * 0.02 + mi * 3) * 25;
+      const my = (Math.cos(simTick * 0.003 + mi * 7.7) * 0.45 + 0.5) * H + Math.cos(simTick * 0.017 + mi * 4) * 20;
+      const tw = (Math.sin(simTick * 0.03 + mi * 2.3) + 1) * 0.5;
+      ctx.fillStyle = `rgba(255,250,225,${dayAmt * (0.10 + tw * 0.18)})`;
+      ctx.beginPath(); ctx.arc(mx, my, 0.8 + tw * 0.8, 0, Math.PI * 2); ctx.fill();
     }
   }
 
@@ -1866,6 +2040,27 @@ function render() {
 
   // Reset transform after shake
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // === LIGHTING FINISH — dappled warm sun pools (day) + vignette ===
+  const _nA = day.nightAmount;
+  if (_nA < 1) {
+    const dAmt = 1 - _nA;
+    for (let li = 0; li < 1; li++) {
+      const lx = (Math.sin(simTick * 0.0008 + li * 2.1) * 0.4 + 0.5) * W;
+      const ly = (Math.cos(simTick * 0.0006 + li * 3.7) * 0.4 + 0.5) * H;
+      const rad = Math.min(W, H) * 0.55;
+      const gg = ctx.createRadialGradient(lx, ly, 0, lx, ly, rad);
+      gg.addColorStop(0, `rgba(255,238,200,${dAmt * 0.06})`);
+      gg.addColorStop(1, 'rgba(255,238,200,0)');
+      ctx.fillStyle = gg;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+  const _vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.30, W / 2, H / 2, Math.max(W, H) * 0.64);
+  _vg.addColorStop(0, 'rgba(0,0,0,0)');
+  _vg.addColorStop(1, `rgba(0,0,0,${0.20 + _nA * 0.30})`);
+  ctx.fillStyle = _vg;
+  ctx.fillRect(0, 0, W, H);
 
   // Brush preview
   if (mouseOver) {
