@@ -437,7 +437,8 @@ function adjustDaySpeed(delta) {
 
 // Population dynamics
 const ANT_MAX_AGE = 3000; // ticks before natural death
-const BIRTH_INTERVAL = 30; // ticks between potential births per nest
+const TOTAL_ANT_CAP = 240; // world carrying capacity across all colonies — bounds the ecosystem + keeps ~60fps
+const BIRTH_INTERVAL = 24; // ticks between potential births per nest (food-rich equilibrium ~125)
 const BIRTH_FOOD_COST = 3; // food collected needed per birth
 
 const EVAP_MAP = [0.980, 0.985, 0.990, 0.993, 0.995, 0.996, 0.997, 0.998, 0.999];
@@ -474,7 +475,7 @@ function addNestAt(px, py) {
     colour: COLONY_COLOURS[colourIdx],
     colourIdx: colourIdx,
     foodCollected: 0,
-    foodBank: 0,
+    foodBank: BIRTH_FOOD_COST * 40, // starting larder — bootstraps births before foraging ramps up (sustainability)
     totalBorn: 0,
     totalDied: 0,
     kills: 0,
@@ -493,9 +494,12 @@ function addNestAt(px, py) {
   queen.x = px + (Math.random() - 0.5) * 4;
   queen.y = py + (Math.random() - 0.5) * 4;
   ants.push(queen);
-  // Then workers/scouts/soldiers
+  // Then workers/scouts/soldiers — stagger their starting ages so the founding
+  // generation dies off gradually instead of all at once (sustainability: no death cliff)
   for (let i = 0; i < numAntsPerNest; i++) {
-    ants.push(createAnt(px, py, id, pickRole()));
+    const a = createAnt(px, py, id, pickRole());
+    a.age = Math.floor(Math.random() * ANT_MAX_AGE);
+    ants.push(a);
   }
   updateLegend();
   return id;
@@ -1190,12 +1194,19 @@ function updatePopulation() {
     }
 
     const maxAnts = Math.floor(numAntsPerNest * 1.5);
+    const underCap = ants.length < TOTAL_ANT_CAP; // world carrying capacity (bounds the ecosystem + keeps ~60fps)
 
     // Birth: if food bank has enough, spawn an ant
-    if (nest.foodBank >= BIRTH_FOOD_COST && myAnts < maxAnts) {
+    if (underCap && nest.foodBank >= BIRTH_FOOD_COST && myAnts < maxAnts) {
       nest.foodBank -= BIRTH_FOOD_COST;
       const role = pickRole();
       ants.push(createAnt(nest.x, nest.y, nest.id, role));
+      nest.totalBorn++;
+    } else if (underCap && myAnts > 0 && myAnts < 15 && Math.random() < 0.5) {
+      // Gentle queen-led floor: a tiny colony with a living queen (we're past the
+      // queenless `continue`) can slowly rebuild even when food is thin — claw back
+      // from the brink instead of spiralling to extinction. Stops once it recovers (>=15).
+      ants.push(createAnt(nest.x, nest.y, nest.id, pickRole()));
       nest.totalBorn++;
     }
 
@@ -1206,7 +1217,7 @@ function updatePopulation() {
       for (const a of ants) {
         if (a.nestId === nest.id && a.founding) { hasFounding = true; break; }
       }
-      if (!hasFounding && Math.random() < 0.002) { // rare event
+      if (!hasFounding && Math.random() < 0.003) { // occasional — a thriving colony spreads (sustainability)
         // Spend food to produce founding queen
         nest.foodBank = Math.max(0, nest.foodBank - 50);
         nest.foodCollected -= 100; // permanent cost
@@ -1283,6 +1294,30 @@ function regrowFood() {
       }
       totalFood++;
     }
+  }
+}
+
+// Living food ecosystem: keep reachable forage near the colonies so they never
+// terminally starve and the population can breathe. (Sustainability)
+let foodCycleCounter = 0;
+function ambientFoodCycle() {
+  foodCycleCounter++;
+  if (foodCycleCounter % 200 !== 0) return; // ~every 200 ticks
+  if (!nests.length) return;
+  let cells = 0;
+  for (let i = 0; i < food.length; i++) if (food[i] > 0) cells++;
+  const target = Math.floor(GW * GH * 0.006); // ~0.6% of the grid carries food
+  if (cells >= target) return;
+  const n = cells < target * 0.5 ? 2 : 1; // refill faster when nearly barren
+  for (let k = 0; k < n; k++) {
+    // spawn near a random living nest, at a reachable foraging distance — so the
+    // colony can actually harvest it (the old far-corner spawns starved colonies)
+    const nest = nests[Math.floor(Math.random() * nests.length)];
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 60 + Math.random() * 160; // 60–220px: worth foraging for, still reachable
+    const px = Math.max(30, Math.min(W - 30, nest.x + Math.cos(ang) * dist));
+    const py = Math.max(30, Math.min(H - 30, nest.y + Math.sin(ang) * dist));
+    placeFood(px, py, 13 + Math.random() * 13, Math.floor(Math.random() * 3));
   }
 }
 
@@ -2954,7 +2989,7 @@ function loop() {
     }
 
     if ((simTick) % 2 === 0) updatePheromones();
-    if (foodRegrowth) regrowFood();
+    if (foodRegrowth) { regrowFood(); ambientFoodCycle(); }
     // Fruit decay — every 60 ticks, rot fruit slightly
     if (simTick % 60 === 0) {
       for (let fi = 0; fi < food.length; fi++) {
