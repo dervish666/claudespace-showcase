@@ -1016,7 +1016,7 @@ function loadModels() {
   const jobs = Object.entries(MODELS).filter(([, m]) => m && m.url).map(([type, m]) => new Promise((resolve) => {
     gltfLoader.load(m.url, (gltf) => {
       const scene = gltf.scene;
-      scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      scene.traverse(o => { o.userData.__tpl = true; if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       const box = new THREE.Box3().setFromObject(scene);
       const size = new THREE.Vector3(), center = new THREE.Vector3();
       box.getSize(size); box.getCenter(center);
@@ -1049,6 +1049,63 @@ function proceduralBuild(type, s) {
   const def = BLDG[type]; return houseBuild(s, def.color, THATCH.has(type) ? '#b89b5e' : '#6b4a32', { long: type === 'farm' });
 }
 
+// ---- Kenney prop decorations (CC0): complete models scattered for atmosphere ----
+const DECOR_PROPS = ['stall','stall-red','stall-green','cart','cart-high','lantern','banner-red','banner-green','hedge','fence'];
+const decorCache = {};
+function loadDecor() {
+  const jobs = DECOR_PROPS.map(name => new Promise((resolve) => {
+    gltfLoader.load('assets/' + name + '.glb', (gltf) => {
+      const scene = gltf.scene;
+      scene.traverse(o => { o.userData.__tpl = true; if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      const box = new THREE.Box3().setFromObject(scene);
+      const size = new THREE.Vector3(), center = new THREE.Vector3(); box.getSize(size); box.getCenter(center);
+      decorCache[name] = { scene, size, center, minY: box.min.y };
+      resolve();
+    }, undefined, (err) => { console.warn('[settlers3d] decor failed:', name, (err && err.message) || err); resolve(); });
+  }));
+  return Promise.all(jobs);
+}
+function propAt(name, fx, fy, target, yaw) {
+  const c = decorCache[name]; if (!c) return null;
+  const ext = Math.max(c.size.x, c.size.y, c.size.z) || 1, sc = (target || 1) / ext;   // fit largest dimension (tall props stay sane)
+  const node = c.scene.clone(true);
+  node.scale.setScalar(sc);
+  node.position.set(-c.center.x * sc, -c.minY * sc, -c.center.z * sc);
+  const yawWrap = new THREE.Group(); yawWrap.rotation.y = yaw || 0; yawWrap.add(node);
+  const g = new THREE.Group(); g.position.set(fx - HALFW + 0.5, groundYAt(fx + 0.5, fy + 0.5), fy - HALFH + 0.5); g.add(yawWrap);
+  return g;
+}
+let gDecor = null;
+function decorLand(tx, ty) { if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) return false; const t = terrain[ty*MAP_W+tx]; return t !== TERRAIN.WATER && t !== TERRAIN.MOUNTAIN; }
+function placeDecor() {
+  if (gDecor) disposeGroup(gDecor);
+  gDecor = new THREE.Group(); scene.add(gDecor);
+  if (!Object.keys(decorCache).length) return;
+  const cx = Math.floor(MAP_W / 2), cy = Math.floor(MAP_H / 2);
+  const add = (name, fx, fy, target, yaw) => {
+    const tx = Math.floor(fx), ty = Math.floor(fy);
+    if (!decorLand(tx, ty) || getBuildingAt(tx, ty)) return;
+    const p = propAt(name, fx, fy, target, yaw); if (p) gDecor.add(p);
+  };
+  // market square south of HQ
+  add('stall-red', cx - 3, cy + 5, 1.7, 0.2); add('stall', cx - 1, cy + 5, 1.7, -0.1); add('stall-green', cx + 1, cy + 5, 1.7, 0.15);
+  add('cart', cx - 2.2, cy + 6.4, 1.2, 0.8); add('cart-high', cx + 1.6, cy + 6.2, 1.2, -0.6);
+  add('lantern', cx - 3.6, cy + 5, 1.3, 0); add('lantern', cx + 2.6, cy + 5, 1.3, 0);
+  add('banner-red', cx - 1, cy + 3.4, 1.7, 0); add('banner-green', cx + 3, cy + 3.4, 1.7, 0);
+  // a lantern beside every other road flag (a lit network)
+  let li = 0; for (const f of flags) { if (li++ % 2 === 0) add('lantern', f.tx + 0.55, f.ty + 0.4, 1.2, 0); }
+  // scatter hedges / fences / carts on grass within HQ territory (deterministic)
+  let placed = 0;
+  for (let r = 4; r < 17 && placed < 12; r++) for (let a = 0; a < 8 && placed < 12; a++) {
+    const ang = a / 8 * Math.PI * 2 + r * 0.7;
+    const tx = Math.round(cx + Math.cos(ang) * r), ty = Math.round(cy + Math.sin(ang) * r);
+    if (!isInTerritory(tx, ty) || !decorLand(tx, ty) || getBuildingAt(tx, ty) || getFlagAt(tx, ty) || terrain[ty*MAP_W+tx] === TERRAIN.FOREST) continue;
+    const h = ((Math.sin(tx * 12.9 + ty * 7.3) * 43758.5) % 1 + 1) % 1;
+    const pick = h < 0.45 ? 'hedge' : (h < 0.75 ? 'fence' : 'cart');
+    add(pick, tx, ty, pick === 'hedge' ? 1.0 : 1.3, (a % 4) * Math.PI / 2); placed++;
+  }
+}
+
 function groundYAt(fx, fy) {
   fx = Math.max(0, Math.min(MAP_W, fx)); fy = Math.max(0, Math.min(MAP_H, fy));
   const x0 = Math.min(Math.floor(fx), MAP_W - 1), y0 = Math.min(Math.floor(fy), MAP_H - 1), u = fx - x0, v = fy - y0;
@@ -1061,7 +1118,7 @@ const tileWZ = (ty) => ty - HALFH + 0.5;
 
 // ---- terrain / water / trees / rocks (static, rebuilt on regen or world change) ----
 let gTerrain, gWater, gTrees, gRocks;
-function disposeGroup(g) { if (!g) return; g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); }); scene.remove(g); }
+function disposeGroup(g) { if (!g) return; g.traverse(o => { if (o.userData && o.userData.__tpl) return; if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); }); scene.remove(g); }
 
 function buildTerrainMesh() {
   const W1 = MAP_W + 1, H1 = MAP_H + 1;
@@ -1177,7 +1234,7 @@ function syncBuildings() {
   }
   for (const [mid, rec] of bldMeshes) if (!seen.has(mid)) { disposeGroup2(rec.group); bldMeshes.delete(mid); }
 }
-function disposeGroup2(g) { g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose()); }); gDynamic.remove(g); }
+function disposeGroup2(g) { g.traverse(o => { if (o.userData && o.userData.__tpl) return; if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose()); }); gDynamic.remove(g); }
 
 const itemGeo = new THREE.BoxGeometry(0.16, 0.15, 0.16);   // a single crate of goods
 // up to 8 crates clustered beside the flag pole: a 2x2 footprint stacked two high
@@ -1489,7 +1546,7 @@ function regenerate() {
   tick = 0; gameTime = 0; vDay = 0.36; territoryDirty = true;   // start the visual clock mid-morning
   clearDynamic();
   generateMap(); addDemoVillage(); updateTerritory(); updatePopulation();
-  rebuildWorld(); saveGame(true); hudDirty = true;
+  rebuildWorld(); placeDecor(); saveGame(true); hudDirty = true;
 }
 
 // ---- persistence (localStorage) ----
@@ -1525,7 +1582,7 @@ function loadGame() {
   carriers = (d.carriers || []).map(c => ({ tx:c.tx, ty:c.ty, targetTx:c.targetTx, targetTy:c.targetTy, carrying:c.carrying, roadFrom:{tx:c.roadFrom.tx,ty:c.roadFrom.ty}, roadTo:{tx:c.roadTo.tx,ty:c.roadTo.ty}, state:c.state, moveProgress:c.moveProgress || 0, moveSpeed:c.moveSpeed || CARRIER_SPEED, waitTimer:0, goingTo:null }));
   animals = d.animals || [];
   computeElevation(); territoryDirty = true; updateTerritory(); updatePopulation();
-  clearDynamic(); rebuildWorld(); hudDirty = true;
+  clearDynamic(); rebuildWorld(); placeDecor(); hudDirty = true;
   return true;
 }
 function newMap() { if (confirm('Start a new map? This replaces your current village.')) regenerate(); }
@@ -1556,6 +1613,7 @@ try {
   buildPalette(); buildControls();
   gWater = buildWaterMesh(); scene.add(gWater);
   await loadModels();                 // load any configured .glb building models (no-op if none)
+  await loadDecor();                  // load Kenney prop models for scattering
   const resumed = loadGame();         // pick up where you left off, else fresh demo village
   if (!resumed) regenerate();
   refreshHUD(); updateHint();

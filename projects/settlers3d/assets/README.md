@@ -58,3 +58,7 @@ A single kit from one artist keeps the style cohesive — much better than mixin
   models needs no extra texture files — just drop the `.glb` in and wire a `MODELS` entry.
   The kit is otherwise modular (wall/roof/door pieces); houses and towers can be assembled
   from those pieces.
+- `stall.glb`, `stall-red.glb`, `stall-green.glb`, `cart.glb`, `cart-high.glb`, `lantern.glb`,
+  `banner-red.glb`, `banner-green.glb`, `hedge.glb`, `fence.glb` — same kit (CC0). Scattered
+  as **decorations** (`placeDecor()` in index.html): a market square by the HQ, lanterns at
+  the road flags, banners, and hedges/fences on grass within territory.
