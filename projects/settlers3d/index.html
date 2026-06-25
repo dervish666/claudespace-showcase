@@ -1137,11 +1137,22 @@ function syncBuildings() {
 }
 function disposeGroup2(g) { g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose()); }); gDynamic.remove(g); }
 
+const itemGeo = new THREE.BoxGeometry(0.16, 0.15, 0.16);   // a single crate of goods
+// up to 8 crates clustered beside the flag pole: a 2x2 footprint stacked two high
+const PILE_SLOTS = [[-0.09,0.075,-0.09],[0.09,0.075,-0.09],[-0.09,0.075,0.09],[0.09,0.075,0.09],
+                    [-0.09,0.225,-0.09],[0.09,0.225,-0.09],[-0.09,0.225,0.09],[0.09,0.225,0.09]];
 function flagMesh() {
   const g = new THREE.Group();
   const pole = cyl(0.03, 0.03, 0.9, 5, '#6a5238'); pole.position.y = 0.45; g.add(pole);
   const cloth = box(0.34, 0.22, 0.02, '#d24b4b'); cloth.position.set(0.18, 0.78, 0); g.add(cloth);
-  g.userData.cloth = cloth; return g;
+  const items = [];
+  for (let i = 0; i < 8; i++) {
+    const m = new THREE.Mesh(itemGeo, mat('#fff', { roughness: 0.8 }));
+    m.castShadow = true; m.receiveShadow = true;
+    m.position.set(PILE_SLOTS[i][0] - 0.26, PILE_SLOTS[i][1], PILE_SLOTS[i][2]);
+    m.visible = false; g.add(m); items.push(m);
+  }
+  g.userData.items = items; return g;
 }
 function syncFlags() {
   const seen = new Set();
@@ -1149,8 +1160,11 @@ function syncFlags() {
     const key = f.tx + ',' + f.ty; seen.add(key);
     let g = flagMeshes.get(key);
     if (!g) { g = flagMesh(); g.position.set(tileWX(f.tx), groundYAt(f.tx+0.5, f.ty+0.5), tileWZ(f.ty)); gDynamic.add(g); flagMeshes.set(key, g); }
-    const load = Math.min(1, f.items.length / 8);
-    g.userData.cloth.material.color.setRGB(0.82 - load*0.5, 0.29 + load*0.35, 0.29);
+    const items = g.userData.items;
+    for (let i = 0; i < 8; i++) {
+      if (i < f.items.length) { items[i].visible = true; items[i].material.color.copy(C(ITEM_COLORS[f.items[i]] || '#cccccc')); }
+      else items[i].visible = false;
+    }
   }
   for (const [key, g] of flagMeshes) if (!seen.has(key)) { disposeGroup2(g); flagMeshes.delete(key); }
 }
