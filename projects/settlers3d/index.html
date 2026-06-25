@@ -1001,31 +1001,41 @@ function mineBuild(s, ore) {
 // ---- optional .glb building models (CC0 kit), with procedural fallback ----
 // Drop a model in assets/ and add an entry here to swap a building's mesh for it.
 // scale is multiplied by the footprint size; yaw rotates to face +Z (door front); y nudges height.
+// Models auto-fit their footprint to the building's tile size, sit on the ground, and
+// face +Z; only `url` and (optional) `yaw`/`scale` (a fill multiplier, default 0.92) are needed.
 const MODELS = {
-  // hq:        { url: 'assets/hq.glb',        scale: 1.0, yaw: 0, y: 0 },
-  // house:     { url: 'assets/house.glb',     scale: 1.0, yaw: 0, y: 0 },
-  // cottage:   { url: 'assets/cottage.glb',   scale: 1.0, yaw: 0, y: 0 },
-  // mill:      { url: 'assets/mill.glb',      scale: 1.0, yaw: 0, y: 0 },
-  // sawmill:   { url: 'assets/sawmill.glb',   scale: 1.0, yaw: 0, y: 0 },
-  // guard:     { url: 'assets/guard.glb',     scale: 1.0, yaw: 0, y: 0 },
+  // Kenney Fantasy Town Kit (CC0) — complete buildings drop straight in:
+  mill:    { url: 'assets/windmill.glb',  yaw: 0 },
+  sawmill: { url: 'assets/watermill.glb', yaw: 0 },
+  well:    { url: 'assets/fountain.glb',  yaw: 0 },
+  // houses/cottages/etc. are assembled from the kit's modular wall+roof pieces (TODO)
 };
 const gltfLoader = new GLTFLoader();
-const modelCache = {};
+const modelCache = {};   // type -> { scene, size, center, minY }
 function loadModels() {
   const jobs = Object.entries(MODELS).filter(([, m]) => m && m.url).map(([type, m]) => new Promise((resolve) => {
     gltfLoader.load(m.url, (gltf) => {
-      gltf.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      modelCache[type] = gltf.scene; resolve();
-    }, undefined, (err) => { console.warn('[settlers3d] model failed, using procedural for', type + ':', (err && err.message) || err); resolve(); });
+      const scene = gltf.scene;
+      scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      const box = new THREE.Box3().setFromObject(scene);
+      const size = new THREE.Vector3(), center = new THREE.Vector3();
+      box.getSize(size); box.getCenter(center);
+      modelCache[type] = { scene, size, center, minY: box.min.y };
+      resolve();
+    }, undefined, (err) => { console.warn('[settlers3d] model failed, procedural for', type + ':', (err && err.message) || err); resolve(); });
   }));
   return Promise.all(jobs);
 }
 function buildFor(type, s) {
-  const m = MODELS[type];
-  if (m && modelCache[type]) {
-    const g = new THREE.Group(), node = modelCache[type].clone(true);
-    node.scale.setScalar((m.scale || 1) * s); node.rotation.y = m.yaw || 0; node.position.y = m.y || 0;
-    g.add(node); return g;
+  const m = MODELS[type], c = modelCache[type];
+  if (m && c) {
+    const foot = Math.max(c.size.x, c.size.z) || 1;
+    const sc = (m.scale || 0.92) * s / foot;                 // fill ~s tiles
+    const node = c.scene.clone(true);
+    node.scale.setScalar(sc);
+    node.position.set(-c.center.x * sc, -c.minY * sc, -c.center.z * sc);   // centre on tile, base on ground
+    const yawWrap = new THREE.Group(); yawWrap.rotation.y = m.yaw || 0; yawWrap.add(node);
+    const g = new THREE.Group(); g.add(yawWrap); return g;
   }
   return proceduralBuild(type, s);
 }

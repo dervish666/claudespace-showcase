@@ -52,4 +52,9 @@ A single kit from one artist keeps the style cohesive — much better than mixin
 
 ## Attributions
 
-_(none yet — add lines here as models are added, e.g. "house.glb — Kenney, CC0")_
+- `windmill.glb` (mill), `watermill.glb` (sawmill), `fountain.glb` (well), and the shared
+  `Textures/colormap.png` — **Kenney Fantasy Town Kit 2.0**, CC0 (www.kenney.nl).
+  Every model in that kit UV-maps onto the single `colormap.png`, so adding more kit
+  models needs no extra texture files — just drop the `.glb` in and wire a `MODELS` entry.
+  The kit is otherwise modular (wall/roof/door pieces); houses and towers can be assembled
+  from those pieces.
