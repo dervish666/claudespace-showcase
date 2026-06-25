@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<!--
+  Settlers — 3D renderer spike (Three.js / WebGL), now PLAYABLE.
+  ----------------------------------------------------------------------------
+  Thesis, demonstrated: upgrading the graphics keeps the SIMULATION and replaces
+  the RENDERER. Everything between  >>> LIFTED SIM <<<  and  >>> END LIFTED SIM <<<
+  is copied VERBATIM from ../index.html (the real 2D Settlers): the terrain enums,
+  the procedural map + river generator, elevation, the building table, AND the live
+  economy — production chains, the flag/road carrier network, placement rules,
+  population/happiness and the season system. Not one line changed.
+
+  The 2D game coupled to its canvas only at a handful of seams (mouse picking,
+  isoTop/worldToScreen for floating text, markTileDirty, sound, and HUD refresh).
+  Those seams are stubbed/redirected here; the 3D layer below reads the same
+  arrays and gives you a real camera, real sun + shadows, click-to-build, and
+  carriers physically walking goods between buildings.
+
+  Three.js is vendored under ./vendor/ (three.module.js + OrbitControls.js), so the
+  project is fully self-contained and runs offline — no CDN, no build, no install.
+  The lifted economy LOGIC is unchanged; a few tuning constants are dialled up for
+  the 3D camera (map size 80²→100², HQ territory radius 15→22, carrier pace) — these
+  are parameters, not logic, and each is commented where it's set.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settlers — 3D (playable spike)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #0a1024; font-family: -apple-system, system-ui, sans-serif; color: #e8eef7; }
+  #c { display: block; width: 100vw; height: 100vh; }
+  .panel { position: fixed; backdrop-filter: blur(8px); background: rgba(18,22,38,0.74);
+    border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+
+  /* top resource bar */
+  #res { top: 12px; left: 50%; transform: translateX(-50%); padding: 8px 12px; display: flex; gap: 12px; flex-wrap: wrap; max-width: 86vw; justify-content: center; }
+  .chip { display: flex; align-items: center; gap: 5px; font-size: 13px; font-variant-numeric: tabular-nums; opacity: 0.95; }
+  .chip .dot { width: 11px; height: 11px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.3); }
+  .chip.zero { opacity: 0.34; }
+  .chip b { font-weight: 650; }
+
+  /* build palette */
+  #build { top: 64px; left: 12px; width: 196px; max-height: calc(100vh - 150px); overflow-y: auto; padding: 10px; }
+  #build h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a94a6; margin: 8px 4px 5px; font-weight: 650; }
+  #build h2:first-child { margin-top: 0; }
+  .bbtn { display: flex; justify-content: space-between; align-items: center; gap: 6px; width: 100%; text-align: left;
+    font: inherit; font-size: 12.5px; color: #e8eef7; cursor: pointer; background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 7px; padding: 6px 8px; margin-bottom: 4px; transition: background 0.1s, border-color 0.1s; }
+  .bbtn:hover { background: rgba(255,255,255,0.12); }
+  .bbtn.sel { border-color: #8ad0ff; background: rgba(138,208,255,0.16); }
+  .bbtn.poor { opacity: 0.42; }
+  .bbtn .nm { font-weight: 550; }
+  .bbtn .ct { font-size: 10.5px; color: #aeb8c8; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* bottom controls */
+  #ctrl { bottom: 12px; left: 12px; padding: 9px 11px; display: flex; gap: 7px; align-items: center; }
+  #ctrl button { font: inherit; font-size: 12.5px; font-weight: 550; color: #e8eef7; cursor: pointer;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); padding: 7px 11px; border-radius: 8px; transition: background 0.12s; }
+  #ctrl button:hover { background: rgba(255,255,255,0.16); }
+  #ctrl button.on { border-color: #8ad0ff; background: rgba(138,208,255,0.18); }
+  #ctrl .sep { width: 1px; height: 22px; background: rgba(255,255,255,0.12); margin: 0 2px; }
+
+  /* clock / status */
+  #status { bottom: 12px; right: 12px; padding: 9px 14px; font-size: 12.5px; line-height: 1.5; text-align: right; }
+  #status .big { font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  #status .sub { color: #9aa4b6; }
+  #status #happy b { color: #8ee29a; }
+
+  /* hint line */
+  #hint { top: 56px; left: 50%; transform: translateX(-50%); padding: 5px 12px; font-size: 12px; color: #aeb8c8; pointer-events: none; transition: opacity 0.2s; }
+
+  /* tooltip */
+  #tip { position: fixed; pointer-events: none; padding: 7px 10px; font-size: 12px; line-height: 1.4; max-width: 220px;
+    background: rgba(12,16,30,0.92); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; display: none; z-index: 30; }
+  #tip .t { font-weight: 650; margin-bottom: 2px; }
+  #tip .l { color: #aeb8c8; font-size: 11.5px; }
+
+  /* floating "+1 wood" labels */
+  #ft { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 25; }
+  .ftl { position: absolute; top: 0; left: 0; font-size: 12px; font-weight: 650; text-shadow: 0 1px 3px rgba(0,0,0,0.7); white-space: nowrap; will-change: transform, opacity; }
+
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #8a94a6; font-size: 14px; z-index: 50; }
+  #err { position: fixed; inset: 0; display: none; place-items: center; padding: 40px; text-align: center; color: #ff9e7a; font-size: 14px; line-height: 1.6; z-index: 60; }
+
+  /* intro card */
+  #intro { top: 64px; right: 12px; max-width: 300px; padding: 14px 16px; transition: opacity 0.3s; }
+  #intro h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+  #intro h1 .tag { font-size: 10px; font-weight: 600; color: #8ad0ff; background: rgba(138,208,255,0.12); padding: 2px 7px; border-radius: 20px; margin-left: 6px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.04em; }
+  #intro p { font-size: 12.5px; line-height: 1.5; color: #aeb8c8; margin-top: 9px; }
+  #intro p b { color: #d6e0ee; } #intro .keep { color: #8ee29a; } #intro .swap { color: #ff9e7a; }
+  #intro button { margin-top: 11px; font: inherit; font-size: 12px; color: #aeb8c8; background: none; border: 1px solid rgba(255,255,255,0.15); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+  #intro button:hover { color: #fff; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="loading">generating world &amp; wiring the economy…</div>
+<div id="err"></div>
+
+<div id="res" class="panel" style="display:none"></div>
+<div id="hint" class="panel" style="display:none"></div>
+<div id="build" class="panel" style="display:none"></div>
+<div id="ctrl" class="panel" style="display:none"></div>
+<div id="status" class="panel" style="display:none"></div>
+<div id="tip"></div>
+<div id="ft"></div>
+
+<div id="intro" class="panel" style="display:none">
+  <h1>Settlers <span class="tag">3D · playable</span></h1>
+  <p>The world and the whole <b class="keep">economy are the 2D game's code, lifted unchanged</b> —
+  production chains, the flag/road carrier network, population &amp; seasons. Only the
+  <b class="swap">renderer + controls</b> are new.</p>
+  <p style="font-size:11.5px;color:#8a94a6">Pick a building (left), click a green tile to place it. Carriers walk goods
+  along roads to your HQ. Right-click cancels. <b>R</b> road · <b>X</b> demolish · <b>Space</b> pause · <b>Ctrl-S/L</b> save/load (auto-saves too).</p>
+  <button onclick="document.getElementById('intro').style.display='none'">Got it →</button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from './vendor/OrbitControls.js';
+
+// ===========================================================================
+// >>> LIFTED SIM <<<  — copied verbatim from ../index.html. Do not edit logic.
+// ===========================================================================
+
+var TW = 64, TH = 32;
+var MAP_W = 100, MAP_H = 100;   // tuned up from the 2D game's 80² for more buildable room under a 3D camera
+var mode = 'build';            // build, road, demolish
+var selectedBuilding = null;
+var speed = 1;
+var tick = 0;
+var gameTime = 0;
+
+var TERRAIN = { WATER: 0, GRASS: 1, FOREST: 2, STONE: 3, HILL: 4, SAND: 5, MOUNTAIN: 6 };
+var TERRAIN_COLORS = {
+  0: ['#1d4e6b','#1f5270','#1c4a66'],
+  1: ['#4f8f3e','#549343','#488a3a','#529245','#4c8c40'],
+  2: ['#3a7030','#3d7434','#366b2c'],
+  3: ['#7c7f78','#868981','#71746d'],
+  4: ['#699648','#719c4e','#629044'],
+  5: ['#d9c98c','#dfd094','#d2c184'],
+  6: ['#74777d','#6b6e74','#7d8086']
+};
+
+var terrain = new Uint8Array(MAP_W * MAP_H);
+var minerals = new Uint8Array(MAP_W * MAP_H);
+var height = new Float32Array(MAP_W * MAP_H);
+var riverSet = new Set();
+var buildings = [];
+var flags = [];
+var roads = [];
+var carriers = [];
+var animals = [];
+var resources = {wood:10, planks:8, stone:8, bread:4, grain:0, flour:0, fish:2, water:0, meat:0, ironore:0, coal:0, goldore:0, iron:0, tools:0, coins:0};
+var floatingTexts = [];
+var MINERAL = {NONE:0, IRON:1, COAL:2, GOLD:3};
+var population = {capacity: 10, employed: 0, happiness: 50, fed: true, tavernBonus: 0};
+
+// ----- day/night + seasons (verbatim) -----
+var DAY_LENGTH = 14400;
+function getTimeOfDay() { return (tick % DAY_LENGTH) / DAY_LENGTH; }
+var DAYS_PER_SEASON = 14;
+var SEASON_LENGTH = DAYS_PER_SEASON * DAY_LENGTH;
+var YEAR_LENGTH = 4 * SEASON_LENGTH;
+function getSeason() { return Math.floor((tick % YEAR_LENGTH) / SEASON_LENGTH); }
+function getSeasonDay() { return Math.floor(((tick % YEAR_LENGTH) % SEASON_LENGTH) / DAY_LENGTH) + 1; }
+function getSeasonName() { return ['Spring','Summer','Autumn','Winter'][getSeason()]; }
+function getDaylight(t) { if (t === undefined) t = getTimeOfDay(); return Math.max(0, Math.min(1, 0.5 + 0.6 * Math.cos((t - 0.5) * Math.PI * 2))); }
+function getClockStr(t) { if (t === undefined) t = getTimeOfDay(); var h = Math.floor(t*24), m = Math.floor((t*24-h)*60); return (h<10?'0':'')+h+':'+(m<10?'0':'')+m; }
+
+function updatePopulation() {
+  var cap = 10, tavernCount = 0;
+  for (var i = 0; i < buildings.length; i++) {
+    var b = buildings[i], def = BLDG[b.type];
+    if (b.built && def.housing) cap += def.housing;
+    if (b.built && b.type === 'tavern') tavernCount++;
+  }
+  population.capacity = cap;
+  var emp = 0;
+  for (var j = 0; j < buildings.length; j++) {
+    var b2 = buildings[j], def2 = BLDG[b2.type];
+    if (b2.type === 'hq') continue;
+    if (def2.category === 'housing') continue;
+    if (b2.built) emp++;
+  }
+  population.employed = emp;
+  var totalFood = (resources.bread || 0) + (resources.fish || 0) + (resources.meat || 0);
+  var foodScore = Math.min(100, totalFood * 10);
+  var housingScore = emp === 0 ? 100 : Math.min(100, (cap / Math.max(1, emp)) * 50);
+  var tavernScore = Math.min(100, tavernCount * 50);
+  population.tavernBonus = tavernScore;
+  var wealthScore = Math.min(100, (resources.coins || 0) * 20);
+  population.happiness = Math.round(foodScore * 0.4 + housingScore * 0.3 + tavernScore * 0.15 + wealthScore * 0.15);
+  population.happiness = Math.max(0, Math.min(100, population.happiness));
+  var seasonHappy = [5, 8, 3, 0][getSeason()];
+  if (getSeason() === 3) {
+    var totalFood2 = (resources.bread || 0) + (resources.fish || 0) + (resources.meat || 0);
+    if (totalFood2 < 5) seasonHappy = -10;
+  }
+  population.happiness = Math.max(0, Math.min(100, population.happiness + seasonHappy));
+}
+function getHappinessMultiplier() {
+  var h = population.happiness;
+  if (h < 30) return 0.7;
+  if (h > 70) return 1.0 + (h - 70) / 100;
+  return 1.0;
+}
+function getSeasonModifier(buildingType) {
+  var s = getSeason(), day = getSeasonDay();
+  if (s === 3 && buildingType === 'farm') return null;
+  if (s === 0 && buildingType === 'farm') return 0.8;
+  if (s === 0 && buildingType === 'forester') return 1.2;
+  if (s === 2 && buildingType === 'farm') return day >= 12 ? 1.5 : 1.0;
+  if (s === 2 && buildingType === 'forester') return 0.8;
+  if (s === 3) {
+    if (buildingType === 'woodcutter' || buildingType === 'hunter' || buildingType === 'quarry') return 0.8;
+    if (buildingType === 'forester') return 0.9;
+  }
+  return 1.0;
+}
+function getAvailableWorkers() { return Math.max(0, population.capacity - population.employed); }
+
+var ITEM_COLORS = {
+  wood: '#8a5a30', planks: '#c0a060', stone: '#808080',
+  grain: '#d0b040', flour: '#e0d8c0', bread: '#b08040',
+  fish: '#5090b0', water: '#4080c0', meat: '#a04040',
+  ironore: '#8a4a30', coal: '#303030', goldore: '#d0b030',
+  iron: '#909090', tools: '#707080', coins: '#e0c040'
+};
+
+var BLDG = {
+  hq: {name:'Headquarters', cost:{}, size:3, desc:'Stores all goods.', color:'#c0a060', produces:null, needs:null, category:'special'},
+  woodcutter: {name:'Woodcutter', cost:{planks:2}, size:1, desc:'Cuts trees → wood.', color:'#8a6a40', produces:'wood', needs:null, category:'gather', interval:200, radius:6},
+  forester: {name:'Forester', cost:{planks:2}, size:1, desc:'Plants trees.', color:'#4a8a40', produces:null, needs:null, category:'gather', interval:150, radius:5},
+  sawmill: {name:'Sawmill', cost:{planks:2,stone:2}, size:2, desc:'Wood → planks.', color:'#a08050', produces:'planks', needs:'wood', category:'process', interval:120},
+  quarry: {name:'Quarry', cost:{planks:2}, size:1, desc:'Mines stone.', color:'#808080', produces:'stone', needs:null, category:'gather', interval:180, radius:5},
+  farm: {name:'Farm', cost:{planks:3,stone:1}, size:2, desc:'Grows grain.', color:'#c0a040', produces:'grain', needs:null, category:'gather', interval:250, radius:4},
+  mill: {name:'Mill', cost:{planks:2,stone:2}, size:2, desc:'Grain → flour.', color:'#b0a070', produces:'flour', needs:'grain', category:'process', interval:100},
+  bakery: {name:'Bakery', cost:{planks:2,stone:2}, size:2, desc:'Flour + water → bread.', color:'#c09050', produces:'bread', needs2:'water', needs:'flour', category:'process', interval:130},
+  fisher: {name:'Fisher', cost:{planks:2}, size:1, desc:'Catches fish near water.', color:'#4a7a9a', produces:'fish', needs:null, category:'gather', interval:160, radius:6, needsTerrain:TERRAIN.WATER},
+  well: {name:'Well', cost:{planks:1,stone:2}, size:1, desc:'Draws water.', color:'#5a8ab0', produces:'water', needs:null, category:'gather', interval:90},
+  hunter: {name:'Hunter', cost:{planks:2}, size:1, desc:'Hunts for meat.', color:'#7a5a3a', produces:'meat', needs:null, category:'gather', interval:220, radius:8},
+  ironmine: {name:'Iron Mine', cost:{planks:3,stone:2}, size:1, desc:'Mines iron ore.', color:'#8a5040', produces:'ironore', needs:null, category:'mine', interval:250, radius:4, needsMineral:MINERAL.IRON},
+  coalmine: {name:'Coal Mine', cost:{planks:3,stone:2}, size:1, desc:'Mines coal.', color:'#404850', produces:'coal', needs:null, category:'mine', interval:220, radius:4, needsMineral:MINERAL.COAL},
+  goldmine: {name:'Gold Mine', cost:{planks:4,stone:3}, size:1, desc:'Mines gold.', color:'#b09030', produces:'goldore', needs:null, category:'mine', interval:300, radius:4, needsMineral:MINERAL.GOLD},
+  smelter: {name:'Smelter', cost:{planks:3,stone:3}, size:2, desc:'Iron ore + coal → iron.', color:'#8a4030', produces:'iron', needs:'ironore', needs2:'coal', category:'process', interval:150},
+  toolmaker: {name:'Toolmaker', cost:{planks:2,stone:2}, size:2, desc:'Iron + planks → tools.', color:'#6a7a60', produces:'tools', needs:'iron', needs2:'planks', category:'process', interval:180},
+  mint: {name:'Mint', cost:{planks:3,stone:3}, size:2, desc:'Gold + coal → coins.', color:'#b0a040', produces:'coins', needs:'goldore', needs2:'coal', category:'process', interval:200},
+  guard: {name:'Guardhouse', cost:{planks:2,stone:3}, size:1, desc:'Expands territory.', color:'#8a4040', produces:null, needs:null, category:'military'},
+  cottage: {name:'Cottage', cost:{planks:2}, size:1, desc:'Houses 4 villagers.', color:'#a07850', produces:null, needs:null, category:'housing', housing:4},
+  house: {name:'House', cost:{planks:3,stone:2}, size:2, desc:'Houses 8 villagers.', color:'#b08860', produces:null, needs:null, category:'housing', housing:8},
+  tavern: {name:'Tavern', cost:{planks:3,stone:1}, size:1, desc:'Bread → morale.', color:'#9a6a50', produces:null, needs:'bread', category:'housing', interval:400},
+};
+
+// renderer/camera globals the lifted code touches — stubbed
+var canvas = { width: 0, height: 0 };
+var cam = { x: 0, y: 0, zoom: 1 };
+var mmDirty = true;
+function markTerrainDirty() {}
+function tileToIso(tx, ty) { return { x: (tx - ty) * (TW / 2), y: (tx + ty) * (TH / 2) }; }
+
+// ----- elevation (verbatim) -----
+var ELEV_STEP = 7, MAX_ELEV = 6;
+var elevTile = new Int8Array(MAP_W * MAP_H);
+var cornerElev = new Float32Array((MAP_W + 1) * (MAP_H + 1));
+var waterDepth = new Uint8Array(MAP_W * MAP_H);
+function computeElevation() {
+  for (var i = 0; i < MAP_W * MAP_H; i++) {
+    var t = terrain[i];
+    if (t === TERRAIN.WATER) { elevTile[i] = 0; continue; }
+    var e = Math.round((height[i] - 0.18) / 0.64 * MAX_ELEV);
+    if (t === TERRAIN.MOUNTAIN) e = Math.max(e, 4);
+    if (t === TERRAIN.SAND) e = Math.min(e, 1);
+    elevTile[i] = Math.max(1, Math.min(MAX_ELEV, e));
+  }
+  for (var cy = 0; cy <= MAP_H; cy++) {
+    for (var cx = 0; cx <= MAP_W; cx++) {
+      var sum = 0, n = 0;
+      for (var dy = -1; dy <= 0; dy++) for (var dx = -1; dx <= 0; dx++) {
+        var tx = cx + dx, ty = cy + dy;
+        if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue;
+        sum += elevTile[ty * MAP_W + tx]; n++;
+      }
+      cornerElev[cy * (MAP_W + 1) + cx] = n ? sum / n : 0;
+    }
+  }
+  waterDepth.fill(0);
+  var q = [], head = 0;
+  for (var wi = 0; wi < MAP_W * MAP_H; wi++) {
+    if (terrain[wi] !== TERRAIN.WATER) continue;
+    var wx = wi % MAP_W, wy = (wi / MAP_W) | 0;
+    var shore = (wx > 0 && terrain[wi - 1] !== TERRAIN.WATER) || (wx < MAP_W - 1 && terrain[wi + 1] !== TERRAIN.WATER) ||
+                (wy > 0 && terrain[wi - MAP_W] !== TERRAIN.WATER) || (wy < MAP_H - 1 && terrain[wi + MAP_W] !== TERRAIN.WATER);
+    if (shore) { waterDepth[wi] = 1; q.push(wi); }
+  }
+  while (head < q.length) {
+    var ci = q[head++], d = waterDepth[ci];
+    if (d >= 7) continue;
+    var cx2 = ci % MAP_W, cy2 = (ci / MAP_W) | 0, nb = [];
+    if (cx2 > 0) nb.push(ci - 1); if (cx2 < MAP_W - 1) nb.push(ci + 1);
+    if (cy2 > 0) nb.push(ci - MAP_W); if (cy2 < MAP_H - 1) nb.push(ci + MAP_W);
+    for (var ni = 0; ni < nb.length; ni++) if (terrain[nb[ni]] === TERRAIN.WATER && waterDepth[nb[ni]] === 0) { waterDepth[nb[ni]] = d + 1; q.push(nb[ni]); }
+  }
+}
+
+function createBuilding(type, tx, ty) {
+  var def = BLDG[type], matNeeded = {};
+  for (var r in def.cost) matNeeded[r] = def.cost[r];
+  return { type: type, tx: tx, ty: ty, built: false, progress: 0, materialsNeeded: matNeeded,
+    materialsTotal: JSON.parse(JSON.stringify(def.cost)), working: false, cooldown: 0, storage: {}, workerOut: false };
+}
+
+function generateMap() {
+  var seed = Math.random() * 10000;
+  function noise2d(x, y) { var n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453; return n - Math.floor(n); }
+  function smoothNoise(x, y, scale) {
+    var sx = x / scale, sy = y / scale, ix = Math.floor(sx), iy = Math.floor(sy), fx = sx - ix, fy = sy - iy;
+    fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+    var a = noise2d(ix, iy), b = noise2d(ix+1, iy), c = noise2d(ix, iy+1), d = noise2d(ix+1, iy+1);
+    return a*(1-fx)*(1-fy) + b*fx*(1-fy) + c*(1-fx)*fy + d*fx*fy;
+  }
+  function fbm(x, y) { return smoothNoise(x, y, 12) * 0.5 + smoothNoise(x, y, 6) * 0.3 + smoothNoise(x, y, 3) * 0.2; }
+  for (var y = 0; y < MAP_H; y++) for (var x = 0; x < MAP_W; x++) {
+    var i = y * MAP_W + x, h = fbm(x, y); height[i] = h;
+    var dx = x / MAP_W - 0.5, dy = y / MAP_H - 0.5;
+    var edgeDist = Math.max(0, Math.min(1, 1 - Math.max(Math.abs(dx), Math.abs(dy)) * 2.5));
+    h *= edgeDist; height[i] = h;
+    if (h < 0.18) terrain[i] = TERRAIN.WATER;
+    else if (h < 0.22) terrain[i] = TERRAIN.SAND;
+    else if (h < 0.55) { terrain[i] = smoothNoise(x, y, 4) > 0.55 ? TERRAIN.FOREST : TERRAIN.GRASS; }
+    else if (h < 0.7) { terrain[i] = smoothNoise(x, y, 5) > 0.5 ? TERRAIN.STONE : TERRAIN.HILL; }
+    else terrain[i] = TERRAIN.MOUNTAIN;
+  }
+  var riverPath = []; riverSet.clear();
+  (function generateRiver() {
+    var side = noise2d(seed + 99, seed + 77) > 0.5 ? 0 : 1, startX, startY, endX, endY;
+    if (side === 0) {
+      startX = Math.floor(MAP_W * 0.3 + noise2d(seed + 200, 1) * MAP_W * 0.4); startY = Math.floor(MAP_H * 0.18 + noise2d(seed + 201, 2) * MAP_H * 0.07);
+      endX = Math.floor(MAP_W * 0.3 + noise2d(seed + 202, 3) * MAP_W * 0.4); endY = Math.floor(MAP_H * 0.75 + noise2d(seed + 203, 4) * MAP_H * 0.07);
+    } else {
+      startX = Math.floor(MAP_W * 0.18 + noise2d(seed + 204, 1) * MAP_W * 0.07); startY = Math.floor(MAP_H * 0.3 + noise2d(seed + 205, 2) * MAP_H * 0.4);
+      endX = Math.floor(MAP_W * 0.75 + noise2d(seed + 206, 3) * MAP_W * 0.07); endY = Math.floor(MAP_H * 0.3 + noise2d(seed + 207, 4) * MAP_H * 0.4);
+    }
+    var rx = startX, ry = startY, maxSteps = MAP_W * 2, visited = {};
+    for (var step = 0; step < maxSteps; step++) {
+      var irx = Math.round(rx), iry = Math.round(ry);
+      if (irx < 1 || irx >= MAP_W - 1 || iry < 1 || iry >= MAP_H - 1) break;
+      var key = irx + ',' + iry;
+      if (!visited[key]) {
+        visited[key] = true;
+        var dcx = irx - MAP_W / 2, dcy = iry - MAP_H / 2;
+        if (Math.sqrt(dcx*dcx + dcy*dcy) > 6) { riverPath.push({x: irx, y: iry}); terrain[iry*MAP_W+irx] = TERRAIN.WATER; height[iry*MAP_W+irx] = 0.12; riverSet.add(iry*MAP_W+irx); }
+      }
+      var dx = endX - rx, dy = endY - ry, dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < 2) break;
+      var tdx = dx / dist, tdy = dy / dist;
+      var meander = (smoothNoise(step * 0.12 + 50, seed * 0.1, 4) - 0.5) * 2.0;
+      meander += (smoothNoise(step * 0.04 + 200, seed * 0.2, 6) - 0.5) * 1.5;
+      var pdx = -tdy * meander, pdy = tdx * meander;
+      var dcx2 = rx - MAP_W / 2, dcy2 = ry - MAP_H / 2, distCenter2 = Math.sqrt(dcx2*dcx2 + dcy2*dcy2);
+      if (distCenter2 < 10) { var pushStr = (10 - distCenter2) * 0.2; pdx += (dcx2 / distCenter2) * pushStr; pdy += (dcy2 / distCenter2) * pushStr; }
+      rx += tdx * 0.7 + pdx * 0.4; ry += tdy * 0.7 + pdy * 0.4;
+    }
+    for (var pi = 0; pi < riverPath.length; pi++) {
+      var pt = riverPath[pi];
+      for (var bdy = -1; bdy <= 1; bdy++) for (var bdx = -1; bdx <= 1; bdx++) {
+        if (bdx === 0 && bdy === 0) continue;
+        var bx = pt.x + bdx, by = pt.y + bdy;
+        if (bx >= 0 && bx < MAP_W && by >= 0 && by < MAP_H) {
+          var bIdx = by * MAP_W + bx;
+          if (terrain[bIdx] !== TERRAIN.WATER && terrain[bIdx] !== TERRAIN.MOUNTAIN && noise2d(bx + 500, by + 500) > 0.6) terrain[bIdx] = TERRAIN.SAND;
+        }
+      }
+    }
+  })();
+  var cx = Math.floor(MAP_W / 2), cy = Math.floor(MAP_H / 2);
+  for (var dyc = -3; dyc <= 3; dyc++) for (var dxc = -3; dxc <= 3; dxc++) {
+    var tx = cx + dxc, ty = cy + dyc;
+    if (tx >= 0 && tx < MAP_W && ty >= 0 && ty < MAP_H) { terrain[ty*MAP_W+tx] = TERRAIN.GRASS; height[ty*MAP_W+tx] = 0.35; }
+  }
+  var stoneCount = 0;
+  for (var dy2 = -10; dy2 <= 10; dy2++) for (var dx2 = -10; dx2 <= 10; dx2++) {
+    var sx = cx + dx2, sy = cy + dy2;
+    if (sx >= 0 && sx < MAP_W && sy >= 0 && sy < MAP_H && terrain[sy*MAP_W+sx] === TERRAIN.STONE) stoneCount++;
+  }
+  if (stoneCount < 15) {
+    var stoneSpots = [
+      {dx: 6 + Math.floor(noise2d(seed, 1) * 3), dy: -4 - Math.floor(noise2d(seed, 2) * 3)},
+      {dx: -5 - Math.floor(noise2d(seed, 3) * 3), dy: 5 + Math.floor(noise2d(seed, 4) * 3)},
+      {dx: 7 + Math.floor(noise2d(seed, 5) * 2), dy: 6 + Math.floor(noise2d(seed, 6) * 2)},
+      {dx: -8 - Math.floor(noise2d(seed, 7) * 2), dy: -2 + Math.floor(noise2d(seed, 8) * 4)},
+      {dx: 3 + Math.floor(noise2d(seed, 9) * 3), dy: 8 + Math.floor(noise2d(seed, 10) * 2)}
+    ];
+    for (var si = 0; si < stoneSpots.length; si++) {
+      var spot = stoneSpots[si];
+      for (var sdy = -2; sdy <= 2; sdy++) for (var sdx = -2; sdx <= 2; sdx++) {
+        if (Math.abs(sdx) + Math.abs(sdy) > 3) continue;
+        var stx = cx + spot.dx + sdx, sty = cy + spot.dy + sdy;
+        if (stx >= 0 && stx < MAP_W && sty >= 0 && sty < MAP_H) {
+          var sti = sty * MAP_W + stx;
+          if (terrain[sti] !== TERRAIN.WATER && terrain[sti] !== TERRAIN.MOUNTAIN) terrain[sti] = TERRAIN.STONE;
+        }
+      }
+    }
+  }
+  minerals.fill(0);
+  for (var mi = 0; mi < MAP_W * MAP_H; mi++) {
+    if (terrain[mi] === TERRAIN.MOUNTAIN) {
+      var mx2 = mi % MAP_W, my2 = Math.floor(mi / MAP_W);
+      if (smoothNoise(mx2 + 100, my2 + 100, 5) > 0.45) {
+        var mType = smoothNoise(mx2 + 200, my2 + 200, 8);
+        minerals[mi] = mType < 0.4 ? MINERAL.IRON : (mType < 0.75 ? MINERAL.COAL : MINERAL.GOLD);
+      }
+    }
+  }
+  var mtCount = 0;
+  for (var mci = 0; mci < MAP_W * MAP_H; mci++) if (terrain[mci] === TERRAIN.MOUNTAIN) mtCount++;
+  if (mtCount < 20) {
+    var mtSpots = [
+      {dx: 14 + Math.floor(noise2d(seed + 50, 1) * 4), dy: -11 - Math.floor(noise2d(seed + 51, 2) * 4)},
+      {dx: -13 - Math.floor(noise2d(seed + 52, 3) * 4), dy: 13 + Math.floor(noise2d(seed + 53, 4) * 4)},
+      {dx: 13 + Math.floor(noise2d(seed + 54, 5) * 4), dy: 13 + Math.floor(noise2d(seed + 55, 6) * 4)},
+      {dx: -14 - Math.floor(noise2d(seed + 56, 7) * 4), dy: -9 - Math.floor(noise2d(seed + 57, 8) * 4)}
+    ];
+    var mineralTypes = [MINERAL.IRON, MINERAL.COAL, MINERAL.GOLD];
+    for (var msi = 0; msi < mtSpots.length; msi++) {
+      var ms = mtSpots[msi], mcx = Math.max(3, Math.min(MAP_W - 4, cx + ms.dx)), mcy = Math.max(3, Math.min(MAP_H - 4, cy + ms.dy));
+      for (var mdy = -3; mdy <= 3; mdy++) for (var mdx = -3; mdx <= 3; mdx++) {
+        if (Math.abs(mdx) + Math.abs(mdy) > 4) continue;
+        var mtx = mcx + mdx, mty = mcy + mdy;
+        if (mtx >= 0 && mtx < MAP_W && mty >= 0 && mty < MAP_H) {
+          var mti = mty * MAP_W + mtx;
+          if (terrain[mti] !== TERRAIN.WATER) { terrain[mti] = TERRAIN.MOUNTAIN; height[mti] = 0.75;
+            if (Math.random() < 0.6) minerals[mti] = mineralTypes[msi]; else if (Math.random() < 0.5) minerals[mti] = MINERAL.COAL; }
+        }
+      }
+    }
+  }
+  var forestCount = 0;
+  for (var dy3 = -8; dy3 <= 8; dy3++) for (var dx3 = -8; dx3 <= 8; dx3++) {
+    var fx2 = cx + dx3, fy2 = cy + dy3;
+    if (fx2 >= 0 && fx2 < MAP_W && fy2 >= 0 && fy2 < MAP_H && terrain[fy2*MAP_W+fx2] === TERRAIN.FOREST) forestCount++;
+  }
+  if (forestCount < 12) {
+    for (var fi = 0; fi < 20; fi++) {
+      var ftx = cx + Math.floor(noise2d(seed + fi, 10) * 12) - 6, fty = cy + Math.floor(noise2d(seed + fi, 11) * 12) - 6;
+      if (ftx >= 0 && ftx < MAP_W && fty >= 0 && fty < MAP_H && Math.abs(ftx - cx) > 3 && Math.abs(fty - cy) > 3 && terrain[fty*MAP_W+ftx] === TERRAIN.GRASS) terrain[fty*MAP_W+ftx] = TERRAIN.FOREST;
+    }
+  }
+  animals = [];
+  for (var ai = 0; ai < MAP_W * MAP_H; ai++) {
+    if (terrain[ai] === TERRAIN.FOREST && Math.random() < 0.008) {
+      var ax = ai % MAP_W, ay = Math.floor(ai / MAP_W);
+      animals.push({tx: ax, ty: ay, type: Math.random() < 0.6 ? 'deer' : 'rabbit', dir: Math.floor(Math.random() * 4), timer: Math.floor(Math.random() * 200), phase: Math.random() * Math.PI * 2});
+    }
+  }
+  computeElevation();
+  markTerrainDirty();
+  var hq = createBuilding('hq', cx, cy); hq.built = true; hq.progress = 1; buildings.push(hq);
+  flags.push({tx: cx, ty: cy + 3, items: []});
+  var iso = tileToIso(cx, cy); cam.x = -iso.x + canvas.width / 2; cam.y = -iso.y + canvas.height / 2;
+}
+
+// ----- territory (verbatim) -----
+var territoryCache = new Uint8Array(MAP_W * MAP_H);
+var territoryDirty = true;
+var territoryVersion = 0;
+function updateTerritory() {
+  territoryCache.fill(0);
+  for (var bi = 0; bi < buildings.length; bi++) {
+    var b = buildings[bi];
+    if (!b.built) continue;
+    var radius = b.type === 'hq' ? 22 : (b.type === 'guard' ? 11 : 6);   // wider territory = more starting space
+    for (var dy = -radius; dy <= radius; dy++) for (var dx = -radius; dx <= radius; dx++) {
+      if (dx*dx + dy*dy > radius*radius) continue;
+      var tx2 = b.tx + dx, ty2 = b.ty + dy;
+      if (tx2 >= 0 && tx2 < MAP_W && ty2 >= 0 && ty2 < MAP_H) territoryCache[ty2 * MAP_W + tx2] = 1;
+    }
+  }
+  territoryDirty = false; territoryVersion++;
+}
+function isInTerritory(tx, ty) {
+  if (territoryDirty) updateTerritory();
+  if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return false;
+  return territoryCache[ty * MAP_W + tx] === 1;
+}
+
+// ----- placement / road network (verbatim) -----
+function canPlaceBuilding(type, tx, ty) {
+  var def = BLDG[type]; if (!def) return false;
+  var isMine = def.category === 'mine', t = terrain[ty * MAP_W + tx];
+  if (isMine) {
+    if (t !== TERRAIN.MOUNTAIN) return false;
+    if (def.needsMineral) {
+      var hasMineral = false;
+      for (var mdy = -def.radius; mdy <= def.radius && !hasMineral; mdy++) for (var mdx = -def.radius; mdx <= def.radius && !hasMineral; mdx++) {
+        var mmx = tx + mdx, mmy = ty + mdy;
+        if (mmx >= 0 && mmx < MAP_W && mmy >= 0 && mmy < MAP_H && minerals[mmy * MAP_W + mmx] === def.needsMineral) hasMineral = true;
+      }
+      if (!hasMineral) return false;
+    }
+  } else if (t === TERRAIN.WATER || t === TERRAIN.MOUNTAIN) return false;
+  for (var dy = 0; dy < def.size; dy++) for (var dx = 0; dx < def.size; dx++) {
+    var ccx = tx + dx, ccy = ty + dy;
+    if (ccx >= MAP_W || ccy >= MAP_H) return false;
+    var ct = terrain[ccy * MAP_W + ccx];
+    if (isMine) { if (ct !== TERRAIN.MOUNTAIN) return false; } else if (ct === TERRAIN.WATER || ct === TERRAIN.MOUNTAIN) return false;
+    if (getBuildingAt(ccx, ccy)) return false;
+  }
+  for (var r in def.cost) if ((resources[r] || 0) < def.cost[r]) return false;
+  if (!isInTerritory(tx, ty)) return false;
+  if (def.category !== 'housing' && type !== 'hq' && getAvailableWorkers() <= 0) return false;
+  return true;
+}
+function getBuildingAt(tx, ty) {
+  for (var i = 0; i < buildings.length; i++) {
+    var b = buildings[i], def = BLDG[b.type];
+    if (tx >= b.tx && tx < b.tx + def.size && ty >= b.ty && ty < b.ty + def.size) return b;
+  }
+  return null;
+}
+function getFlagAt(tx, ty) { for (var i = 0; i < flags.length; i++) if (flags[i].tx === tx && flags[i].ty === ty) return flags[i]; return null; }
+function getRoadBetween(f1, f2) {
+  for (var i = 0; i < roads.length; i++) {
+    var r = roads[i];
+    if ((r.from.tx === f1.tx && r.from.ty === f1.ty && r.to.tx === f2.tx && r.to.ty === f2.ty) ||
+        (r.from.tx === f2.tx && r.from.ty === f2.ty && r.to.tx === f1.tx && r.to.ty === f1.ty)) return r;
+  }
+  return null;
+}
+function findNearestFlag(tx, ty) {
+  var best = null, bestDist = Infinity;
+  for (var i = 0; i < flags.length; i++) { var d = Math.abs(flags[i].tx - tx) + Math.abs(flags[i].ty - ty); if (d < bestDist) { bestDist = d; best = flags[i]; } }
+  return best;
+}
+function findConnectedFlag(fromFlag, excludeFlag) {
+  var connected = [];
+  for (var i = 0; i < roads.length; i++) {
+    var r = roads[i];
+    if (r.from.tx === fromFlag.tx && r.from.ty === fromFlag.ty) { var f = getFlagAt(r.to.tx, r.to.ty); if (f && f !== excludeFlag) connected.push(f); }
+    if (r.to.tx === fromFlag.tx && r.to.ty === fromFlag.ty) { var f2 = getFlagAt(r.from.tx, r.from.ty); if (f2 && f2 !== excludeFlag) connected.push(f2); }
+  }
+  return connected;
+}
+function findPathToHQ(startFlag) {
+  var hq = buildings.find(function(b) { return b.type === 'hq'; });
+  if (!hq) return null;
+  var hqFlag = findNearestFlag(hq.tx, hq.ty + 3);
+  if (!hqFlag) return null;
+  if (startFlag === hqFlag) return [hqFlag];
+  var visited = new Set(), queue = [[startFlag]];
+  visited.add(startFlag.tx + ',' + startFlag.ty);
+  while (queue.length > 0) {
+    var path = queue.shift(), current = path[path.length - 1], neighbors = findConnectedFlag(current, null);
+    for (var i = 0; i < neighbors.length; i++) {
+      var key = neighbors[i].tx + ',' + neighbors[i].ty;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      var newPath = path.concat([neighbors[i]]);
+      if (neighbors[i] === hqFlag) return newPath;
+      queue.push(newPath);
+    }
+  }
+  return null;
+}
+function placeBuilding(type, tx, ty) {
+  if (!canPlaceBuilding(type, tx, ty)) return false;
+  var def = BLDG[type];
+  for (var r in def.cost) resources[r] -= def.cost[r];
+  var b = createBuilding(type, tx, ty); buildings.push(b); territoryDirty = true; mmDirty = true; sfxPlace();
+  var flagTx = tx, flagTy = ty + def.size, newFlag = getFlagAt(flagTx, flagTy);
+  if (!newFlag && flagTy < MAP_H) { if (terrain[flagTy * MAP_W + flagTx] !== TERRAIN.WATER) { newFlag = {tx: flagTx, ty: flagTy, items: []}; flags.push(newFlag); } }
+  if (newFlag) {
+    var bestFlag = null, bestDist = Infinity;
+    for (var fi = 0; fi < flags.length; fi++) {
+      var cf = flags[fi]; if (cf === newFlag) continue;
+      var fd = Math.abs(cf.tx - newFlag.tx) + Math.abs(cf.ty - newFlag.ty);
+      if (fd <= 8 && fd < bestDist) {
+        var isConnected = false;
+        for (var ri = 0; ri < roads.length; ri++) if ((roads[ri].from.tx === cf.tx && roads[ri].from.ty === cf.ty) || (roads[ri].to.tx === cf.tx && roads[ri].to.ty === cf.ty)) { isConnected = true; break; }
+        var hq2 = buildings.find(function(b2) { return b2.type === 'hq'; });
+        if (hq2 && cf.tx === hq2.tx && cf.ty === hq2.ty + 3) isConnected = true;
+        if (isConnected && fd < bestDist) { bestDist = fd; bestFlag = cf; }
+      }
+    }
+    if (bestFlag && !getRoadBetween(newFlag, bestFlag)) placeRoad(newFlag, bestFlag);
+  }
+  updateResourceDisplay();
+  return true;
+}
+function placeFlag(tx, ty) {
+  if (getFlagAt(tx, ty)) return false;
+  if (terrain[ty * MAP_W + tx] === TERRAIN.WATER) return false;
+  if (getBuildingAt(tx, ty)) return false;
+  flags.push({tx: tx, ty: ty, items: []});
+  return true;
+}
+function placeRoad(f1, f2) {
+  if (getRoadBetween(f1, f2)) return false;
+  if (Math.abs(f1.tx - f2.tx) + Math.abs(f1.ty - f2.ty) > 8) return false;
+  roads.push({from: {tx: f1.tx, ty: f1.ty}, to: {tx: f2.tx, ty: f2.ty}}); sfxRoad();
+  carriers.push({ tx: f1.tx, ty: f1.ty, targetTx: f1.tx, targetTy: f1.ty, carrying: null,
+    roadFrom: f1, roadTo: f2, state: 'idle', moveProgress: 0, moveSpeed: 0.03, waitTimer: 0, goingTo: null });
+  return true;
+}
+
+// ----- simulation (verbatim) -----
+function simulate() {
+  if (speed === 0) return;
+  for (var sp = 0; sp < speed; sp++) {
+    tick++; gameTime += 0.5;
+    if (tick % 10 === 0) {
+      for (var api = 0; api < buildings.length; api++) {
+        var ab = buildings[api];
+        if (ab.type === 'hq') continue;
+        var aDef = BLDG[ab.type], aFlag = getFlagAt(ab.tx, ab.ty + (aDef.size || 1));
+        if (!aFlag) continue;
+        if (aFlag.items.length === 0 && ab.built) continue;
+        if (!ab.built) {
+          if (findPathToHQ(aFlag)) {
+            for (var cmk in ab.materialsNeeded) if (ab.materialsNeeded[cmk] > 0) { ab.materialsNeeded[cmk]--; var abiso = isoTop(ab.tx, ab.ty); floatingTexts.push({x: abiso.x, y: abiso.y, text: '+' + cmk, color: '#c0a060', life: 45, maxLife: 45}); break; }
+          }
+          for (var afi = aFlag.items.length - 1; afi >= 0; afi--) { var aItem = aFlag.items[afi]; if (ab.materialsNeeded && (ab.materialsNeeded[aItem] || 0) > 0) { ab.materialsNeeded[aItem]--; aFlag.items.splice(afi, 1); } }
+          if (aFlag.items.length > 2) {
+            for (var afi4 = aFlag.items.length - 1; afi4 >= 0; afi4--) {
+              var clearItem = aFlag.items[afi4], isConstMat = ab.materialsNeeded && (ab.materialsNeeded[clearItem] || 0) > 0;
+              if (!isConstMat) {
+                var pushed2 = false, cFlags = findConnectedFlag(aFlag, null);
+                for (var cfi2 = 0; cfi2 < cFlags.length; cfi2++) { var cf3 = getFlagAt(cFlags[cfi2].tx, cFlags[cfi2].ty); if (cf3 && cf3.items.length < 6) { cf3.items.push(clearItem); aFlag.items.splice(afi4, 1); pushed2 = true; break; } }
+                if (!pushed2) { resources[clearItem] = (resources[clearItem] || 0) + 1; aFlag.items.splice(afi4, 1); }
+              }
+            }
+          }
+        } else {
+          if (aDef.needs) for (var afi2 = aFlag.items.length - 1; afi2 >= 0; afi2--) if (aFlag.items[afi2] === aDef.needs && (ab.storage[aDef.needs] || 0) < 5) { ab.storage[aDef.needs] = (ab.storage[aDef.needs] || 0) + 1; aFlag.items.splice(afi2, 1); break; }
+          if (aDef.needs2) for (var afi3 = aFlag.items.length - 1; afi3 >= 0; afi3--) if (aFlag.items[afi3] === aDef.needs2 && (ab.storage[aDef.needs2] || 0) < 5) { ab.storage[aDef.needs2] = (ab.storage[aDef.needs2] || 0) + 1; aFlag.items.splice(afi3, 1); break; }
+        }
+      }
+    }
+    if (tick % 15 === 0) {
+      var hqAS = buildings.find(function(b) { return b.type === 'hq'; });
+      if (hqAS) {
+        var hqASFlag = getFlagAt(hqAS.tx, hqAS.ty + 3);
+        if (hqASFlag && hqASFlag.items.length >= 5) {
+          var constNeeds = {};
+          for (var cni = 0; cni < buildings.length; cni++) { var cnb = buildings[cni]; if (!cnb.built && cnb.materialsNeeded) for (var cnr in cnb.materialsNeeded) if (cnb.materialsNeeded[cnr] > 0) constNeeds[cnr] = (constNeeds[cnr] || 0) + cnb.materialsNeeded[cnr]; }
+          var stored = 0;
+          for (var hfi = hqASFlag.items.length - 1; hfi >= 0 && stored < 2; hfi--) {
+            var hItem = hqASFlag.items[hfi];
+            if (constNeeds[hItem] && constNeeds[hItem] > 0) { constNeeds[hItem]--; continue; }
+            resources[hItem] = (resources[hItem] || 0) + 1; hqASFlag.items.splice(hfi, 1); stored++;
+          }
+          if (stored > 0) updateResourceDisplay();
+        }
+      }
+    }
+    if (tick % 25 === 0) {
+      for (var cfi = 0; cfi < flags.length; cfi++) {
+        var cf2 = flags[cfi]; if (cf2.items.length < 5) continue;
+        var cfBld = getBuildingForFlag(cf2.tx, cf2.ty);
+        for (var cii = cf2.items.length - 1; cii >= 0; cii--) {
+          var cItem = cf2.items[cii], needed = false;
+          if (cfBld) {
+            if (!cfBld.built && cfBld.materialsNeeded && (cfBld.materialsNeeded[cItem] || 0) > 0) needed = true;
+            if (cfBld.built) { var cDef = BLDG[cfBld.type]; if (cDef.needs === cItem || cDef.needs2 === cItem) needed = true; }
+          }
+          if (!needed) {
+            var routed = false, connFlags = findConnectedFlag(cf2, null);
+            for (var cni = 0; cni < connFlags.length; cni++) { var cnf = getFlagAt(connFlags[cni].tx, connFlags[cni].ty); if (cnf && cnf.items.length < 4) { cnf.items.push(cItem); cf2.items.splice(cii, 1); routed = true; break; } }
+            if (!routed && cf2.items.length >= 8) { resources[cItem] = (resources[cItem] || 0) + 1; cf2.items.splice(cii, 1); updateResourceDisplay(); }
+          }
+        }
+      }
+    }
+    if (tick % 20 === 0) {
+      var hqB = buildings.find(function(b) { return b.type === 'hq'; });
+      if (hqB) {
+        var hqFlag = getFlagAt(hqB.tx, hqB.ty + 3);
+        if (hqFlag && hqFlag.items.length < 4) {
+          var productionNeeded = {};
+          for (var ni = 0; ni < buildings.length; ni++) {
+            var nb = buildings[ni]; if (nb.type === 'hq') continue;
+            var ndef = BLDG[nb.type];
+            if (!nb.built) { var nbFlag = getFlagAt(nb.tx, nb.ty + (ndef.size || 1)); if (nbFlag && findPathToHQ(nbFlag)) { for (var cmr in nb.materialsNeeded) if (nb.materialsNeeded[cmr] > 0) {} } continue; }
+            if (ndef.needs && (nb.storage[ndef.needs] || 0) < 3) productionNeeded[ndef.needs] = true;
+            if (ndef.needs2 && (nb.storage[ndef.needs2] || 0) < 3) productionNeeded[ndef.needs2] = true;
+          }
+          var pushed = 0;
+          for (var pres in productionNeeded) {
+            if (pushed >= 2 || hqFlag.items.length >= 6) break;
+            if ((resources[pres] || 0) > 0) {
+              var onFlag2 = hqFlag.items.filter(function(it) { return it === pres; }).length;
+              if (onFlag2 < 2) { resources[pres]--; hqFlag.items.push(pres); pushed++; }
+            }
+          }
+          if (pushed > 0) updateResourceDisplay();
+        }
+      }
+    }
+    if (tick % 600 === 0) {
+      var foodTypes = ['bread', 'fish', 'meat'], foodNeeded = Math.ceil(population.employed / 3);
+      for (var fn = 0; fn < foodNeeded; fn++) { var ate = false; for (var ft2 = 0; ft2 < foodTypes.length && !ate; ft2++) if ((resources[foodTypes[ft2]] || 0) > 0) { resources[foodTypes[ft2]]--; ate = true; } }
+      if (foodNeeded > 0) updateResourceDisplay();
+    }
+    if (tick % 120 === 0) { updatePopulation(); updateEconomy(); }
+    for (var i = 0; i < buildings.length; i++) {
+      var b = buildings[i], def = BLDG[b.type];
+      if (!b.built) {
+        var allDelivered = true;
+        for (var mr in b.materialsNeeded) if (b.materialsNeeded[mr] > 0) { allDelivered = false; break; }
+        if (allDelivered || Object.keys(b.materialsTotal).length === 0) {
+          b.progress += 0.005;
+          if (b.progress >= 1) { b.built = true; b.progress = 1; territoryDirty = true; mmDirty = true; var biso = isoTop(b.tx, b.ty); floatingTexts.push({x: biso.x, y: biso.y, text: def.name + ' built!', color: '#8ac0ff', life: 90, maxLife: 90}); sfxBuilt(); }
+        }
+        continue;
+      }
+      if (b.cooldown > 0) { b.cooldown--; continue; }
+      if (b.type === 'cottage' || b.type === 'house') continue;
+      var prodFlag2 = getFlagAt(b.tx, b.ty + (def.size || 1));
+      if (prodFlag2 && prodFlag2.items.length >= 6 && def.produces) { b.cooldown = 30; b.working = false; continue; }
+      var hMult = getHappinessMultiplier(), seasonMod = getSeasonModifier(b.type);
+      if (seasonMod === null) { b.working = false; b.cooldown = 60; continue; }
+      if (b.type === 'tavern') {
+        if ((b.storage.bread || 0) > 0) { b.storage.bread--; b.working = true; var tiso = isoTop(b.tx, b.ty); floatingTexts.push({x: tiso.x, y: tiso.y, text: '🍺 Cheers!', color: '#c0a050', life: 60, maxLife: 60}); } else b.working = false;
+        b.cooldown = def.interval; continue;
+      }
+      if (b.type === 'forester') {
+        var planted = false;
+        for (var attempt = 0; attempt < 5; attempt++) {
+          var dxp = Math.floor(Math.random() * (def.radius * 2 + 1)) - def.radius, dyp = Math.floor(Math.random() * (def.radius * 2 + 1)) - def.radius;
+          var px = b.tx + dxp, py = b.ty + dyp;
+          if (px >= 0 && px < MAP_W && py >= 0 && py < MAP_H) { var ti = py * MAP_W + px; if (terrain[ti] === TERRAIN.GRASS && !getBuildingAt(px, py)) { terrain[ti] = TERRAIN.FOREST; planted = true; markTileDirty(px, py); break; } }
+        }
+        b.working = planted; b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+      }
+      else if (def.produces && !def.needs) {
+        if (b.type === 'woodcutter') {
+          var found = false;
+          for (var dx2 = -def.radius; dx2 <= def.radius && !found; dx2++) for (var dy2 = -def.radius; dy2 <= def.radius && !found; dy2++) {
+            var fx = b.tx + dx2, fy = b.ty + dy2;
+            if (fx >= 0 && fx < MAP_W && fy >= 0 && fy < MAP_H && terrain[fy*MAP_W+fx] === TERRAIN.FOREST) { terrain[fy*MAP_W+fx] = TERRAIN.GRASS; markTileDirty(fx, fy); depositItem(b, def.produces); sfxChop(); found = true; }
+          }
+          b.working = found; b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'quarry') {
+          var foundS = false;
+          for (var dx3 = -def.radius; dx3 <= def.radius && !foundS; dx3++) for (var dy3 = -def.radius; dy3 <= def.radius && !foundS; dy3++) {
+            var sx = b.tx + dx3, sy = b.ty + dy3;
+            if (sx >= 0 && sx < MAP_W && sy >= 0 && sy < MAP_H && terrain[sy*MAP_W+sx] === TERRAIN.STONE) { if (Math.random() < 0.3) { terrain[sy*MAP_W+sx] = TERRAIN.HILL; markTileDirty(sx, sy); } depositItem(b, def.produces); sfxHammer(); foundS = true; }
+          }
+          b.working = foundS; b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'fisher') {
+          var hasWater = false;
+          for (var dx4 = -def.radius; dx4 <= def.radius && !hasWater; dx4++) for (var dy4 = -def.radius; dy4 <= def.radius && !hasWater; dy4++) {
+            var wx2 = b.tx + dx4, wy2 = b.ty + dy4;
+            if (wx2 >= 0 && wx2 < MAP_W && wy2 >= 0 && wy2 < MAP_H && terrain[wy2*MAP_W+wx2] === TERRAIN.WATER) hasWater = true;
+          }
+          if (hasWater) { depositItem(b, 'fish'); b.working = true; } else b.working = false;
+          b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'well') { depositItem(b, 'water'); b.working = true; b.cooldown = Math.round(def.interval / (hMult * seasonMod)); }
+        else if (b.type === 'hunter') {
+          var hunted = false;
+          for (var ha = 0; ha < animals.length && !hunted; ha++) { var prey = animals[ha]; if (Math.abs(prey.tx - b.tx) <= def.radius && Math.abs(prey.ty - b.ty) <= def.radius) { animals.splice(ha, 1); depositItem(b, 'meat'); hunted = true; } }
+          if (!hunted) {
+            var hasForest = false;
+            for (var dx5 = -def.radius; dx5 <= def.radius && !hasForest; dx5++) for (var dy5 = -def.radius; dy5 <= def.radius && !hasForest; dy5++) { var hx = b.tx + dx5, hy = b.ty + dy5; if (hx >= 0 && hx < MAP_W && hy >= 0 && hy < MAP_H && terrain[hy*MAP_W+hx] === TERRAIN.FOREST) hasForest = true; }
+            if (hasForest) { depositItem(b, 'meat'); hunted = true; }
+          }
+          b.working = hunted; b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+        else if (b.type === 'farm') { depositItem(b, 'grain'); b.working = true; b.cooldown = Math.round(def.interval / (hMult * seasonMod)); }
+        else if (def.category === 'mine') {
+          var mined = false;
+          for (var mdx2 = -def.radius; mdx2 <= def.radius && !mined; mdx2++) for (var mdy2 = -def.radius; mdy2 <= def.radius && !mined; mdy2++) {
+            var mmx2 = b.tx + mdx2, mmy2 = b.ty + mdy2;
+            if (mmx2 >= 0 && mmx2 < MAP_W && mmy2 >= 0 && mmy2 < MAP_H) { var mIdx = mmy2 * MAP_W + mmx2; if (minerals[mIdx] === def.needsMineral) { if (Math.random() < 0.15) { minerals[mIdx] = MINERAL.NONE; mmDirty = true; markTileDirty(mmx2, mmy2); } depositItem(b, def.produces); sfxHammer(); mined = true; } }
+          }
+          b.working = mined; b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+        }
+      }
+      else if (def.produces && def.needs) {
+        var hasInput = (b.storage[def.needs] || 0) > 0, hasInput2 = !def.needs2 || (b.storage[def.needs2] || 0) > 0;
+        if (hasInput && hasInput2) { b.storage[def.needs] = (b.storage[def.needs] || 0) - 1; if (def.needs2) b.storage[def.needs2] = (b.storage[def.needs2] || 0) - 1; depositItem(b, def.produces); if (b.type === 'sawmill') sfxSaw(); else if (b.type === 'smelter') sfxSmelt(); else if (b.type === 'toolmaker') sfxHammer(); else sfxProduce(); b.working = true; }
+        else b.working = false;
+        b.cooldown = Math.round(def.interval / (hMult * seasonMod));
+      }
+    }
+    for (var ci = 0; ci < carriers.length; ci++) updateCarrier(carriers[ci]);
+    if (tick % 8 === 0) {
+      for (var ai2 = 0; ai2 < animals.length; ai2++) {
+        var an = animals[ai2]; an.timer--;
+        if (an.timer <= 0) {
+          an.timer = 60 + Math.floor(Math.random() * 120); an.dir = Math.floor(Math.random() * 4);
+          var dxa = [0, 1, 0, -1][an.dir], dya = [-1, 0, 1, 0][an.dir], nx = an.tx + dxa, ny = an.ty + dya;
+          if (nx >= 0 && nx < MAP_W && ny >= 0 && ny < MAP_H) { var nt = terrain[ny*MAP_W+nx]; if (nt === TERRAIN.FOREST || nt === TERRAIN.GRASS) { an.tx = nx; an.ty = ny; } }
+        }
+        an.phase += 0.1;
+      }
+      if (animals.length < 40 && Math.random() < 0.01) { var spx = Math.floor(Math.random() * MAP_W), spy = Math.floor(Math.random() * MAP_H); if (terrain[spy*MAP_W+spx] === TERRAIN.FOREST) animals.push({tx: spx, ty: spy, type: Math.random() < 0.6 ? 'deer' : 'rabbit', dir: 0, timer: 100, phase: Math.random() * Math.PI * 2}); }
+    }
+  }
+  updateSeasonParticles();
+}
+function depositItem(building, item) {
+  var def = BLDG[building.type], flag = getFlagAt(building.tx, building.ty + (def.size || 1)) || findNearestFlag(building.tx, building.ty);
+  if (flag && flag.items.length < 8) flag.items.push(item); else building.storage[item] = (building.storage[item] || 0) + 1;
+  var iso = isoTop(building.tx, building.ty), col = ITEM_COLORS[item] || '#fff';
+  floatingTexts.push({x: iso.x, y: iso.y, text: '+1 ' + item, color: col, life: 60, maxLife: 60});
+}
+function getBuildingForFlag(flagTx, flagTy) {
+  for (var bi = 0; bi < buildings.length; bi++) { var b = buildings[bi]; if (b.tx === flagTx && (b.ty + (BLDG[b.type].size || 1)) === flagTy) return b; }
+  return null;
+}
+function updateCarrier(c) {
+  if (c.state === 'idle') {
+    var flag1 = getFlagAt(c.roadFrom.tx, c.roadFrom.ty), flag2 = getFlagAt(c.roadTo.tx, c.roadTo.ty);
+    if (!flag1 || !flag2) return;
+    var myFlag = (c.tx === c.roadFrom.tx && c.ty === c.roadFrom.ty) ? flag1 : flag2, otherFlag = (myFlag === flag1) ? flag2 : flag1;
+    if (myFlag.items.length > 0) {
+      var bestIdx = 0, otherBld = getBuildingForFlag(otherFlag.tx, otherFlag.ty);
+      if (otherBld) {
+        var odef = BLDG[otherBld.type];
+        for (var pi = 0; pi < myFlag.items.length; pi++) {
+          var pitem = myFlag.items[pi];
+          if (!otherBld.built && otherBld.materialsNeeded && (otherBld.materialsNeeded[pitem] || 0) > 0) { bestIdx = pi; break; }
+          if (otherBld.built && (odef.needs === pitem || odef.needs2 === pitem) && (otherBld.storage[pitem] || 0) < 5) { bestIdx = pi; break; }
+        }
+      }
+      c.carrying = myFlag.items.splice(bestIdx, 1)[0]; c.state = 'walking'; c.targetTx = otherFlag.tx; c.targetTy = otherFlag.ty; c.moveProgress = 0;
+    } else if (otherFlag.items.length > 0) { c.state = 'walking'; c.targetTx = otherFlag.tx; c.targetTy = otherFlag.ty; c.moveProgress = 0; }
+  } else if (c.state === 'walking') {
+    c.moveProgress += c.moveSpeed;
+    if (c.moveProgress >= 1) {
+      c.tx = c.targetTx; c.ty = c.targetTy; c.moveProgress = 0;
+      var returnTrip = false;
+      if (c.carrying) {
+        var delivered = false, bldHere = getBuildingForFlag(c.tx, c.ty);
+        if (bldHere) {
+          if (!bldHere.built && bldHere.materialsNeeded && (bldHere.materialsNeeded[c.carrying] || 0) > 0) { bldHere.materialsNeeded[c.carrying]--; var biso2 = isoTop(bldHere.tx, bldHere.ty); floatingTexts.push({x: biso2.x, y: biso2.y, text: '+' + c.carrying, color: '#c0a060', life: 45, maxLife: 45}); c.carrying = null; delivered = true; }
+          else if (bldHere.built) { var bdef = BLDG[bldHere.type]; if ((bdef.needs === c.carrying || bdef.needs2 === c.carrying) && (bldHere.storage[c.carrying] || 0) < 5) { bldHere.storage[c.carrying] = (bldHere.storage[c.carrying] || 0) + 1; c.carrying = null; delivered = true; } }
+        }
+        if (!delivered) {
+          var hq = buildings.find(function(b2) { return b2.type === 'hq'; });
+          if (hq && c.tx === hq.tx && c.ty === hq.ty + 3) { resources[c.carrying] = (resources[c.carrying] || 0) + 1; var hiso = isoTop(hq.tx, hq.ty); floatingTexts.push({x: hiso.x, y: hiso.y, text: '+1 ' + c.carrying, color: '#4a90d0', life: 45, maxLife: 45}); c.carrying = null; delivered = true; updateResourceDisplay(); }
+        }
+        if (!delivered) {
+          var destFlag = getFlagAt(c.tx, c.ty);
+          if (destFlag && destFlag.items.length < 8) { destFlag.items.push(c.carrying); c.carrying = null; }
+          else { returnTrip = true; var rTx = (c.tx === c.roadFrom.tx && c.ty === c.roadFrom.ty) ? c.roadTo.tx : c.roadFrom.tx, rTy = (c.tx === c.roadFrom.tx && c.ty === c.roadFrom.ty) ? c.roadTo.ty : c.roadFrom.ty; c.targetTx = rTx; c.targetTy = rTy; c.moveProgress = 0; }
+        }
+      }
+      if (!returnTrip) c.state = 'idle';
+    }
+  }
+}
+
+// ----- coupling stubs (the only seams the 2D canvas owned) -----
+function isoTop(tx, ty) { return { x: tx, y: ty }; }        // floating-text positions, now in tile coords
+function worldToScreen() { return { x: 0, y: 0 }; }
+function markTileDirty(tx, ty) { worldDirty = true; }
+function updateSeasonParticles() {}
+function sfxPlace(){} function sfxBuilt(){} function sfxProduce(){} function sfxRoad(){}
+function sfxChop(){} function sfxSaw(){} function sfxHammer(){} function sfxSmelt(){} function sfxSmith(){}
+function updateResourceDisplay() { hudDirty = true; }
+function updateEconomy() { hudDirty = true; }
+
+// ===========================================================================
+// >>> END LIFTED SIM <<<
+// ===========================================================================
+
+
+// ===========================================================================
+// >>> NEW RENDERER + GAME LAYER <<<  — Three.js. Reads the arrays above.
+// ===========================================================================
+
+const HSCALE = 0.92, WLEVEL = 0.4 * HSCALE, HALFW = MAP_W / 2, HALFH = MAP_H / 2;
+const DAY_SECONDS = 360;       // a full day/night takes ~6 real minutes (visual only — sim seasons/food run off raw tick)
+const CARRIER_SPEED = 0.011;   // carrier pace is a presentation choice (2D used 0.03 — too fast to watch); they plod in 3D
+let worldDirty = false, hudDirty = true, manualTime = null, vDay = 0.36;
+
+const cv = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x9ec4ff, 130, 380);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 800);
+camera.position.set(42, 40, 56);
+
+const controls = new OrbitControls(camera, cv);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.target.set(0, 1.5, 0); controls.minDistance = 8; controls.maxDistance = 175;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+
+const hemi = new THREE.HemisphereLight(0x9ec4ff, 0x4a6a3a, 0.6); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff3df, 2.3);
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 280;
+const scsz = 70; sun.shadow.camera.left = -scsz; sun.shadow.camera.right = scsz; sun.shadow.camera.top = scsz; sun.shadow.camera.bottom = -scsz;
+sun.shadow.bias = -0.0008; sun.target.position.set(0, 0, 0);
+scene.add(sun); scene.add(sun.target);
+const amb = new THREE.AmbientLight(0x6478a4, 0.2); scene.add(amb);
+
+// ---- sky dome (gradient, tinted by time of day) ----
+const skyUniforms = { top: { value: new THREE.Color(0x2a5cff) }, bottom: { value: new THREE.Color(0xbfe0ff) }, off: { value: 0.0 } };
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(420, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, uniforms: skyUniforms,
+  vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader: 'varying vec3 vP; uniform vec3 top; uniform vec3 bottom; uniform float off; void main(){ float h = clamp((normalize(vP).y+off)*0.5+0.5,0.0,1.0); gl_FragColor = vec4(mix(bottom, top, pow(h,0.8)), 1.0); }'
+}));
+scene.add(skyDome);
+
+// ---- material + mesh helpers ----
+const C = (s) => new THREE.Color(s);
+function mat(color, opts) { return new THREE.MeshStandardMaterial(Object.assign({ color: C(color), roughness: 0.92, metalness: 0.0 }, opts || {})); }
+function box(w, h, d, color, opts) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color, opts)); m.castShadow = true; m.receiveShadow = true; return m; }
+function cyl(rt, rb, h, seg, color, opts) { const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat(color, opts)); m.castShadow = true; m.receiveShadow = true; return m; }
+function gableRoof(w, h, d, color) {
+  const hw = w / 2, hd = d / 2;
+  const bL0 = [-hw,0,-hd], bR0 = [hw,0,-hd], ap0 = [0,h,-hd], bL1 = [-hw,0,hd], bR1 = [hw,0,hd], ap1 = [0,h,hd];
+  const tris = [bL0,ap0,ap1, bL0,ap1,bL1, bR0,ap1,ap0, bR0,bR1,ap1, bL0,bR0,ap0, bL1,ap1,bR1];
+  const pos = new Float32Array(tris.length * 3);
+  for (let i = 0; i < tris.length; i++) { pos[i*3]=tris[i][0]; pos[i*3+1]=tris[i][1]; pos[i*3+2]=tris[i][2]; }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, mat(color, { side: THREE.DoubleSide, roughness: 0.95 })); m.castShadow = true; m.receiveShadow = true; return m;
+}
+function coneRoof(r, h, color, seg) { const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, seg || 8), mat(color, { flatShading: true, roughness: 0.95 })); m.castShadow = true; m.receiveShadow = true; return m; }
+
+const THATCH = new Set(['woodcutter','forester','cottage','fisher','hunter','tavern','farm']);
+function regWindows(g, w, wallH, d, s) {
+  for (let i = -1; i <= 1; i += 2) {
+    const wm = mat('#37301d', { emissive: C('#ffce79'), emissiveIntensity: 0 });
+    g.userData.win = (g.userData.win || []); g.userData.win.push(wm);
+    const pane = new THREE.Mesh(new THREE.PlaneGeometry(0.16*s, 0.2*s), wm);
+    pane.position.set(i * w * 0.26, wallH * 0.58, d/2 + 0.012); g.add(pane);
+  }
+}
+function houseBuild(s, wallC, roofC, opts) {
+  opts = opts || {}; const g = new THREE.Group();
+  const w = s * 0.82, d = (opts.long ? s * 1.25 : s * 0.72), wallH = s * 0.5 + 0.18;
+  const walls = box(w, wallH, d, wallC); walls.position.y = wallH / 2; g.add(walls);
+  const roof = gableRoof(w * 1.12, s * 0.48 + 0.22, d * 1.14, roofC); roof.position.y = wallH; g.add(roof);
+  const door = box(0.16*s, 0.3*s, 0.05, '#3a2a1a'); door.position.set(0, 0.15*s, d/2 + 0.02); g.add(door);
+  regWindows(g, w, wallH, d, s);
+  if (opts.long) { const barn = box(s*0.5, s*0.4, s*0.45, '#7a5638'); barn.position.set(w*0.55, s*0.2, -d*0.2); g.add(barn); }
+  return g;
+}
+function millBuild(s) {
+  const g = new THREE.Group(); const r = s * 0.4, bodyH = s * 0.95;
+  const body = cyl(r * 0.86, r, bodyH, 12, '#8c857a'); body.position.y = bodyH / 2; g.add(body);
+  const roof = coneRoof(r * 1.12, s * 0.55, '#5b4636', 12); roof.position.y = bodyH + s * 0.275; g.add(roof);
+  const hub = new THREE.Group(); hub.position.set(0, bodyH * 0.74, r * 0.95);
+  for (let i = 0; i < 4; i++) { const holder = new THREE.Group(); holder.rotation.z = i * Math.PI / 2; const blade = box(0.08*s, s * 0.92, 0.03, '#d8bb86'); blade.position.y = s * 0.52; holder.add(blade); hub.add(holder); }
+  g.add(hub); g.userData.sail = hub; regWindows(g, r * 1.4, bodyH, r * 1.4, s); return g;
+}
+function keepBuild(s) {
+  const g = new THREE.Group(); const w = s * 0.62, h = s * 0.78;
+  const base = box(w, h, w, '#9a9088'); base.position.y = h / 2; g.add(base);
+  const step = w / 4;
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { if (i !== 0 && i !== 3 && j !== 0 && j !== 3) continue; const cr = box(step*0.7, s*0.14, step*0.7, '#8a8078'); cr.position.set(-w/2+step/2+i*step, h+s*0.07, -w/2+step/2+j*step); g.add(cr); }
+  const tur = cyl(s*0.16, s*0.16, h*1.3, 9, '#928880'); tur.position.set(w*0.42, h*0.65, w*0.42); g.add(tur);
+  const turRoof = coneRoof(s*0.22, s*0.4, '#7a3b3b', 9); turRoof.position.set(w*0.42, h*1.3 + s*0.2, w*0.42); g.add(turRoof);
+  const pole = cyl(0.025*s, 0.025*s, s*0.6, 5, '#3a3026'); pole.position.set(-w*0.3, h+s*0.3, -w*0.3); g.add(pole);
+  const flag = box(s*0.28, s*0.18, 0.02, '#b23b3b'); flag.position.set(-w*0.3 + s*0.15, h+s*0.42, -w*0.3); g.add(flag);
+  regWindows(g, w, h, w, s); return g;
+}
+function guardBuild(s) {
+  const g = new THREE.Group(); const w = s * 0.5, h = s * 1.35;
+  const body = box(w, h, w, '#8f8780'); body.position.y = h / 2; g.add(body);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { if (i !== 0 && i !== 3 && j !== 0 && j !== 3) continue; const cr = box(w/4*0.7, s*0.12, w/4*0.7, '#7f776f'); cr.position.set(-w/2+w/8+i*w/4, h+s*0.06, -w/2+w/8+j*w/4); g.add(cr); }
+  const door = box(0.13*s, 0.26*s, 0.05, '#2e241a'); door.position.set(0, 0.13*s, w/2 + 0.02); g.add(door);
+  regWindows(g, w, h, w, s); return g;
+}
+function mineBuild(s, ore) {
+  const g = new THREE.Group();
+  const mound = new THREE.Mesh(new THREE.IcosahedronGeometry(s * 0.6, 0), mat('#6f6a63', { flatShading: true }));
+  mound.scale.set(1.2, 0.7, 1.2); mound.position.y = s * 0.28; mound.castShadow = true; mound.receiveShadow = true; g.add(mound);
+  const portal = box(0.26*s, 0.3*s, 0.18*s, '#241c14'); portal.position.set(0, 0.15*s, s * 0.5); g.add(portal);
+  const post1 = box(0.05*s, 0.32*s, 0.05*s, '#4a3826'); post1.position.set(-0.13*s, 0.16*s, s*0.5); g.add(post1);
+  const post2 = post1.clone(); post2.position.x = 0.13*s; g.add(post2);
+  const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(s * 0.14, 0), mat(ore, { flatShading: true, emissive: C(ore), emissiveIntensity: 0.15, roughness: 0.5 }));
+  crystal.position.set(s*0.32, s*0.42, s*0.18); crystal.castShadow = true; g.add(crystal);
+  return g;
+}
+function buildFor(type, s) {
+  if (type === 'hq') return keepBuild(s);
+  if (type === 'mill') return millBuild(s);
+  if (type === 'guard') return guardBuild(s);
+  if (type === 'ironmine') return mineBuild(s, '#c4704e');
+  if (type === 'coalmine') return mineBuild(s, '#2a2e36');
+  if (type === 'goldmine') return mineBuild(s, '#e2bd45');
+  const def = BLDG[type]; return houseBuild(s, def.color, THATCH.has(type) ? '#b89b5e' : '#6b4a32', { long: type === 'farm' });
+}
+
+function groundYAt(fx, fy) {
+  fx = Math.max(0, Math.min(MAP_W, fx)); fy = Math.max(0, Math.min(MAP_H, fy));
+  const x0 = Math.min(Math.floor(fx), MAP_W - 1), y0 = Math.min(Math.floor(fy), MAP_H - 1), u = fx - x0, v = fy - y0;
+  const cE = (ix, iy) => cornerElev[iy * (MAP_W + 1) + ix];
+  const a = cE(x0, y0), b = cE(x0+1, y0), c = cE(x0, y0+1), d = cE(x0+1, y0+1);
+  return (a*(1-u)*(1-v) + b*u*(1-v) + c*(1-u)*v + d*u*v) * HSCALE;
+}
+const tileWX = (tx) => tx - HALFW + 0.5;   // tile centre → world X (tx integer)
+const tileWZ = (ty) => ty - HALFH + 0.5;
+
+// ---- terrain / water / trees / rocks (static, rebuilt on regen or world change) ----
+let gTerrain, gWater, gTrees, gRocks;
+function disposeGroup(g) { if (!g) return; g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); }); scene.remove(g); }
+
+function buildTerrainMesh() {
+  const W1 = MAP_W + 1, H1 = MAP_H + 1;
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(W1 * H1 * 3), col = new Float32Array(W1 * H1 * 3);
+  const variantColor = (t, x, y) => { const arr = TERRAIN_COLORS[t]; return C(arr[(x * 7 + y * 13) % arr.length]); };
+  const tmp = new THREE.Color();
+  for (let iy = 0; iy < H1; iy++) for (let ix = 0; ix < W1; ix++) {
+    const vi = iy * W1 + ix, e = cornerElev[vi];
+    pos[vi*3] = ix - HALFW; pos[vi*3+1] = e * HSCALE; pos[vi*3+2] = iy - HALFH;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let dy = -1; dy <= 0; dy++) for (let dx = -1; dx <= 0; dx++) {
+      const tx = ix + dx, ty = iy + dy; if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) continue;
+      tmp.copy(variantColor(terrain[ty*MAP_W+tx], tx, ty)); r += tmp.r; g += tmp.g; b += tmp.b; n++;
+    }
+    if (n) { r/=n; g/=n; b/=n; }
+    const tint = 0.86 + 0.035 * e; col[vi*3] = r*tint; col[vi*3+1] = g*tint; col[vi*3+2] = b*tint;
+  }
+  const idx = [];
+  for (let iy = 0; iy < MAP_H; iy++) for (let ix = 0; ix < MAP_W; ix++) { const a = iy*W1+ix, b = a+1, c = a+W1, d = c+1; idx.push(a, c, b, b, c, d); }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 }));
+  m.receiveShadow = true; const g = new THREE.Group(); g.add(m); return g;
+}
+function buildWaterMesh() {
+  const span = 360, seg = 60;
+  const geo = new THREE.PlaneGeometry(span, span, seg, seg); geo.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: C('#2c6f93'), transparent: true, opacity: 0.84, roughness: 0.15, metalness: 0.12 }));
+  m.position.y = WLEVEL; m.receiveShadow = true;
+  const g = new THREE.Group(); g.add(m); g.userData.water = m; g.userData.base = geo.attributes.position.array.slice(); return g;
+}
+function jitter(i, k) { const v = Math.sin((i + 1) * (12.9898 + k * 4.137)) * 43758.5453; return v - Math.floor(v); }
+function buildTreeMeshes() {
+  const decid = [], conif = [];
+  for (let i = 0; i < MAP_W * MAP_H; i++) { if (terrain[i] !== TERRAIN.FOREST) continue; (elevTile[i] >= 3 ? conif : decid).push(i); }
+  const g = new THREE.Group(); const total = decid.length + conif.length; if (total === 0) return g;
+  const trunkGeo = new THREE.CylinderGeometry(0.05, 0.08, 0.5, 5), decGeo = new THREE.IcosahedronGeometry(0.34, 0), conGeo = new THREE.ConeGeometry(0.32, 0.95, 7);
+  const trunkMat = mat('#5a4129', { flatShading: true }), decMat = mat('#3f7d33', { flatShading: true }), conMat = mat('#2f5f38', { flatShading: true });
+  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, total);
+  const decM = new THREE.InstancedMesh(decGeo, decMat, decid.length || 1), conM = new THREE.InstancedMesh(conGeo, conMat, conif.length || 1);
+  trunks.castShadow = decM.castShadow = conM.castShadow = true; trunks.receiveShadow = decM.receiveShadow = conM.receiveShadow = true;
+  const M = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), tint = new THREE.Color();
+  let ti = 0;
+  function emit(arr, mesh, canopyH) {
+    for (let k = 0; k < arr.length; k++) {
+      const i = arr[k], x = i % MAP_W, y = (i / MAP_W) | 0;
+      const jx = (jitter(i, 1) - 0.5) * 0.5, jy = (jitter(i, 2) - 0.5) * 0.5, sc = 0.8 + jitter(i, 3) * 0.6;
+      const gx = tileWX(x) + jx, gz = tileWZ(y) + jy, gy = groundYAt(x + 0.5 + jx, y + 0.5 + jy);
+      P.set(gx, gy + 0.25 * sc, gz); Q.identity(); S.set(sc, sc, sc); M.compose(P, Q, S); trunks.setMatrixAt(ti, M); ti++;
+      Q.setFromAxisAngle(new THREE.Vector3(0,1,0), jitter(i, 5) * 6.28); P.set(gx, gy + (0.5 + canopyH * 0.5) * sc, gz); M.compose(P, Q, S); mesh.setMatrixAt(k, M);
+      tint.setHSL(0.3, 0.45, 0.32 + jitter(i, 9) * 0.12); mesh.setColorAt(k, tint);
+    }
+  }
+  emit(decid, decM, 0.68); emit(conif, conM, 0.95);
+  trunks.instanceMatrix.needsUpdate = true;
+  if (decid.length) { decM.instanceMatrix.needsUpdate = true; decM.instanceColor.needsUpdate = true; g.add(decM); }
+  if (conif.length) { conM.instanceMatrix.needsUpdate = true; conM.instanceColor.needsUpdate = true; g.add(conM); }
+  g.add(trunks); return g;
+}
+function buildRockMeshes() {
+  const stoneIdx = [], oreIdx = [];
+  for (let i = 0; i < MAP_W * MAP_H; i++) { if (terrain[i] === TERRAIN.STONE) stoneIdx.push(i); else if (terrain[i] === TERRAIN.MOUNTAIN && minerals[i]) oreIdx.push(i); }
+  const g = new THREE.Group(); const rockGeo = new THREE.IcosahedronGeometry(0.3, 0), rockMat = mat('#807a72', { flatShading: true });
+  if (stoneIdx.length) {
+    const im = new THREE.InstancedMesh(rockGeo, rockMat, stoneIdx.length); im.castShadow = true; im.receiveShadow = true;
+    const M = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3();
+    for (let k = 0; k < stoneIdx.length; k++) { const i = stoneIdx[k], x = i % MAP_W, y = (i / MAP_W) | 0, sc = 0.6 + jitter(i, 4) * 0.8;
+      P.set(tileWX(x), groundYAt(x+0.5, y+0.5) + 0.12*sc, tileWZ(y)); Q.setFromAxisAngle(new THREE.Vector3(0,1,0), jitter(i,6)*6.28); S.set(sc, sc*0.7, sc); M.compose(P, Q, S); im.setMatrixAt(k, M); }
+    im.instanceMatrix.needsUpdate = true; g.add(im);
+  }
+  const oreColors = { 1: '#c4704e', 2: '#2a2e36', 3: '#e2bd45' };
+  if (oreIdx.length) {
+    const crGeo = new THREE.OctahedronGeometry(0.16, 0);
+    for (const i of oreIdx) { const x = i % MAP_W, y = (i / MAP_W) | 0, col = oreColors[minerals[i]];
+      const cr = new THREE.Mesh(crGeo, mat(col, { flatShading: true, emissive: C(col), emissiveIntensity: 0.12, roughness: 0.5 }));
+      cr.position.set(tileWX(x), groundYAt(x+0.5, y+0.5) + 0.18, tileWZ(y)); cr.castShadow = true; g.add(cr); }
+  }
+  return g;
+}
+function rebuildWorld() {
+  disposeGroup(gTerrain); disposeGroup(gTrees); disposeGroup(gRocks);
+  gTerrain = buildTerrainMesh(); scene.add(gTerrain);
+  gTrees = buildTreeMeshes(); scene.add(gTrees);
+  gRocks = buildRockMeshes(); scene.add(gRocks);
+}
+
+// ---- dynamic entities (buildings / flags / roads / carriers) ----
+const gDynamic = new THREE.Group(); scene.add(gDynamic);
+const bldMeshes = new Map();   // __mid -> {group, built}
+const flagMeshes = new Map();  // "tx,ty" -> group
+const roadMeshes = new Map();  // "key" -> mesh
+const carMeshes = new Map();   // __cid -> {group, item}
+let midSeq = 0, cidSeq = 0;
+
+function setOpacity(group, o) { group.traverse(m => { if (m.material) { m.material.transparent = o < 1; m.material.opacity = o; } }); }
+
+function syncBuildings() {
+  const seen = new Set();
+  for (const b of buildings) {
+    if (b.__mid == null) b.__mid = ++midSeq;
+    seen.add(b.__mid);
+    let rec = bldMeshes.get(b.__mid);
+    const s = BLDG[b.type].size || 1;
+    if (!rec) {
+      const grp = buildFor(b.type, s);
+      grp.position.set(tileWX(b.tx) + (s-1)/2, groundYAt(b.tx + s/2, b.ty + s/2), tileWZ(b.ty) + (s-1)/2);
+      gDynamic.add(grp); rec = { group: grp, built: null }; bldMeshes.set(b.__mid, rec);
+    }
+    if (!b.built) { const p = 0.35 + 0.6 * b.progress; rec.group.scale.y = 0.45 + 0.55 * b.progress; setOpacity(rec.group, p); rec.built = false; }
+    else if (rec.built !== true) { rec.group.scale.y = 1; setOpacity(rec.group, 1); rec.built = true; }
+  }
+  for (const [mid, rec] of bldMeshes) if (!seen.has(mid)) { disposeGroup2(rec.group); bldMeshes.delete(mid); }
+}
+function disposeGroup2(g) { g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose()); }); gDynamic.remove(g); }
+
+function flagMesh() {
+  const g = new THREE.Group();
+  const pole = cyl(0.03, 0.03, 0.9, 5, '#6a5238'); pole.position.y = 0.45; g.add(pole);
+  const cloth = box(0.34, 0.22, 0.02, '#d24b4b'); cloth.position.set(0.18, 0.78, 0); g.add(cloth);
+  g.userData.cloth = cloth; return g;
+}
+function syncFlags() {
+  const seen = new Set();
+  for (const f of flags) {
+    const key = f.tx + ',' + f.ty; seen.add(key);
+    let g = flagMeshes.get(key);
+    if (!g) { g = flagMesh(); g.position.set(tileWX(f.tx), groundYAt(f.tx+0.5, f.ty+0.5), tileWZ(f.ty)); gDynamic.add(g); flagMeshes.set(key, g); }
+    const load = Math.min(1, f.items.length / 8);
+    g.userData.cloth.material.color.setRGB(0.82 - load*0.5, 0.29 + load*0.35, 0.29);
+  }
+  for (const [key, g] of flagMeshes) if (!seen.has(key)) { disposeGroup2(g); flagMeshes.delete(key); }
+}
+
+function roadRibbon(f1, f2) {
+  const N = Math.max(2, Math.ceil(Math.abs(f1.tx-f2.tx) + Math.abs(f1.ty-f2.ty))), half = 0.17;
+  const tdx = f2.tx - f1.tx, tdy = f2.ty - f1.ty, len = Math.hypot(tdx, tdy) || 1, px = -tdy/len, py = tdx/len;
+  const pos = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, ftx = f1.tx + tdx*t, fty = f1.ty + tdy*t, wy = groundYAt(ftx+0.5, fty+0.5) + 0.07;
+    pos.push(tileWX(ftx) + px*half, wy, tileWZ(fty) + py*half, tileWX(ftx) - px*half, wy, tileWZ(fty) - py*half);
+  }
+  const idx = []; for (let i = 0; i < N; i++) { const a = i*2, b = a+1, c = a+2, d = a+3; idx.push(a, c, b, b, c, d); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, mat('#80704c', { roughness: 1.0, side: THREE.DoubleSide })); m.receiveShadow = true; return m;
+}
+function syncRoads() {
+  const seen = new Set();
+  for (const r of roads) {
+    const key = [r.from.tx, r.from.ty, r.to.tx, r.to.ty].join(','); seen.add(key);
+    if (!roadMeshes.has(key)) { const m = roadRibbon(r.from, r.to); gDynamic.add(m); roadMeshes.set(key, m); }
+  }
+  for (const [key, m] of roadMeshes) if (!seen.has(key)) { m.geometry.dispose(); m.material.dispose(); gDynamic.remove(m); roadMeshes.delete(key); }
+}
+
+function carrierMesh() {
+  const g = new THREE.Group();
+  const body = box(0.2, 0.34, 0.2, '#caa15a'); body.position.y = 0.17; g.add(body);
+  const head = box(0.13, 0.13, 0.13, '#e8c9a0'); head.position.y = 0.4; g.add(head);
+  const load = box(0.18, 0.18, 0.18, '#ffffff'); load.position.y = 0.56; load.visible = false; g.add(load);
+  g.userData.load = load; return g;
+}
+function syncCarriers() {
+  const seen = new Set();
+  for (const c of carriers) {
+    if (c.__cid == null) { c.__cid = ++cidSeq; c.moveSpeed = CARRIER_SPEED; }   // override the lifted pace so carriers plod
+    seen.add(c.__cid);
+    let rec = carMeshes.get(c.__cid);
+    if (!rec) { const g = carrierMesh(); gDynamic.add(g); rec = { group: g }; carMeshes.set(c.__cid, rec); }
+    let ftx = c.tx, fty = c.ty;
+    if (c.state === 'walking') { ftx = c.tx + (c.targetTx - c.tx) * c.moveProgress; fty = c.ty + (c.targetTy - c.ty) * c.moveProgress; }
+    rec.group.position.set(tileWX(ftx), groundYAt(ftx + 0.5, fty + 0.5) + 0.04, tileWZ(fty));
+    const ld = rec.group.userData.load;
+    if (c.carrying) { ld.visible = true; ld.material.color.copy(C(ITEM_COLORS[c.carrying] || '#fff')); } else ld.visible = false;
+  }
+  for (const [cid, rec] of carMeshes) if (!seen.has(cid)) { disposeGroup2(rec.group); carMeshes.delete(cid); }
+}
+
+// ---- starter village: place built, with flags + roads so the economy is alive on load ----
+function addDemoVillage() {
+  const cx = Math.floor(MAP_W / 2), cy = Math.floor(MAP_H / 2), occ = new Set();
+  const markOcc = (b) => { const s = BLDG[b.type].size || 1; for (let oy=0; oy<s; oy++) for (let ox=0; ox<s; ox++) occ.add((b.ty+oy)*MAP_W + (b.tx+ox)); };
+  markOcc(buildings[0]);
+  function findNear(tx, ty, pred, maxR) {
+    for (let r = 0; r <= maxR; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = tx+dx, y = ty+dy; if (x < 1 || y < 1 || x >= MAP_W-1 || y >= MAP_H-1) continue; if (pred(x, y)) return { x, y };
+    }
+    return null;
+  }
+  const land = (x, y) => terrain[y*MAP_W+x] !== TERRAIN.WATER && terrain[y*MAP_W+x] !== TERRAIN.MOUNTAIN && !occ.has(y*MAP_W+x);
+  function place(type, x, y) {
+    if (x == null) return null;
+    const b = createBuilding(type, x, y); b.built = true; b.progress = 1; buildings.push(b); markOcc(b);
+    // flag + auto-road to nearest flag (mirrors placeBuilding's logistics)
+    const s = BLDG[type].size || 1, fty = y + s;
+    if (fty < MAP_H && terrain[fty*MAP_W+x] !== TERRAIN.WATER && !getFlagAt(x, fty)) {
+      const nf = { tx: x, ty: fty, items: [] }; flags.push(nf);
+      let best = null, bd = Infinity;
+      for (const cf of flags) { if (cf === nf) continue; const d = Math.abs(cf.tx-nf.tx) + Math.abs(cf.ty-nf.ty); if (d <= 8 && d < bd) { bd = d; best = cf; } }
+      if (best) placeRoad(nf, best);
+    }
+    return b;
+  }
+  const at = (type, ox, oy) => { const s = findNear(cx+ox, cy+oy, land, 6); return place(type, s && s.x, s && s.y); };
+  const fo = findNear(cx, cy, (x,y) => terrain[y*MAP_W+x] === TERRAIN.FOREST, 22);
+  if (fo) { place('woodcutter', fo.x, fo.y); const f2 = findNear(fo.x, fo.y, land, 4); place('forester', f2 && f2.x, f2 && f2.y); }
+  const st = findNear(cx, cy, (x,y) => terrain[y*MAP_W+x] === TERRAIN.STONE, 22); if (st) place('quarry', st.x, st.y);
+  // tight cluster so flags connect into one network feeding HQ
+  at('sawmill', -4, -3); at('mill', 4, -4); at('bakery', 5, -1); at('well', -2, 4);
+  at('farm', -5, 3); at('tavern', 2, 5); at('cottage', -3, -1); at('cottage', 3, 1); at('house', 0, -5); at('guard', 6, 2);
+}
+
+// ---- HUD ----
+const resEl = document.getElementById('res'), buildEl = document.getElementById('build'), ctrlEl = document.getElementById('ctrl'), statusEl = document.getElementById('status'), hintEl = document.getElementById('hint'), tipEl = document.getElementById('tip'), ftEl = document.getElementById('ft');
+const RES_ORDER = ['wood','planks','stone','grain','flour','bread','water','fish','meat','ironore','coal','iron','goldore','tools','coins'];
+function refreshResBar() {
+  let html = '';
+  for (const k of RES_ORDER) { const v = resources[k] || 0; html += `<span class="chip ${v===0?'zero':''}"><span class="dot" style="background:${ITEM_COLORS[k]}"></span><b>${v}</b></span>`; }
+  resEl.innerHTML = html;
+}
+const CATS = [['Gather','woodcutter forester quarry farm fisher well hunter'], ['Mine','ironmine coalmine goldmine'], ['Process','sawmill mill bakery smelter toolmaker mint'], ['Housing','cottage house tavern'], ['Military','guard']];
+function buildPalette() {
+  let html = '';
+  for (const [label, list] of CATS) {
+    html += `<h2>${label}</h2>`;
+    for (const type of list.split(' ')) {
+      const def = BLDG[type], cost = Object.entries(def.cost).map(([k,v]) => `${v} ${k}`).join(', ') || 'free';
+      html += `<button class="bbtn" data-type="${type}"><span class="nm">${def.name}</span><span class="ct">${cost}</span></button>`;
+    }
+  }
+  buildEl.innerHTML = html;
+  buildEl.querySelectorAll('.bbtn').forEach(btn => btn.onclick = () => selectType(btn.dataset.type));
+}
+function refreshAffordability() {
+  buildEl.querySelectorAll('.bbtn').forEach(btn => {
+    const def = BLDG[btn.dataset.type]; let poor = false;
+    for (const [k,v] of Object.entries(def.cost)) if ((resources[k]||0) < v) poor = true;
+    btn.classList.toggle('poor', poor);
+    btn.classList.toggle('sel', mode === 'build' && selectedBuilding === btn.dataset.type);
+  });
+}
+function buildControls() {
+  ctrlEl.innerHTML = `<button id="b-road">⚑ Road</button><button id="b-dem">⛏ Demolish</button><span class="sep"></span>
+    <button id="b-pause">⏸</button><button id="b-1" class="on">1×</button><button id="b-2">2×</button><button id="b-3">3×</button>
+    <span class="sep"></span><button id="b-save">💾 Save</button><button id="b-load">📂 Load</button><button id="b-new">↻ New map</button>`;
+  document.getElementById('b-road').onclick = () => setMode(mode === 'road' ? 'build' : 'road');
+  document.getElementById('b-dem').onclick = () => setMode(mode === 'demolish' ? 'build' : 'demolish');
+  document.getElementById('b-save').onclick = () => saveGame(false);
+  document.getElementById('b-load').onclick = () => flashHint(loadGame() ? '✓ Village loaded' : 'No saved village yet');
+  document.getElementById('b-new').onclick = newMap;
+  const sb = { 'b-pause':0, 'b-1':1, 'b-2':2, 'b-3':3 };
+  for (const id in sb) document.getElementById(id).onclick = () => setSpeed(sb[id], id);
+}
+function setSpeed(s, id) { speed = s; ['b-pause','b-1','b-2','b-3'].forEach(x => document.getElementById(x).classList.toggle('on', x === id)); }
+function setMode(m) {
+  mode = m; if (m !== 'build') selectedBuilding = null;
+  document.getElementById('b-road').classList.toggle('on', m === 'road');
+  document.getElementById('b-dem').classList.toggle('on', m === 'demolish');
+  roadStart = null; clearGhost(); refreshAffordability(); updateHint();
+}
+function selectType(type) { mode = 'build'; selectedBuilding = type; document.getElementById('b-road').classList.remove('on'); document.getElementById('b-dem').classList.remove('on'); refreshAffordability(); makeGhost(type); updateHint(); }
+function updateHint() {
+  let t = 'Pick a building, then click a green tile';
+  if (mode === 'road') t = roadStart ? 'Click another flag (or empty tile) to connect' : 'Click a flag to start a road';
+  else if (mode === 'demolish') t = 'Click a building or flag to remove it';
+  else if (selectedBuilding) t = `Placing ${BLDG[selectedBuilding].name} — click a green tile · right-click to cancel`;
+  hintEl.textContent = t;
+}
+function flashHint(msg) { hintEl.textContent = msg; clearTimeout(flashHint._t); flashHint._t = setTimeout(updateHint, 1500); }
+function refreshHUD() {
+  refreshResBar(); refreshAffordability();
+  const t = manualTime != null ? manualTime : vDay;
+  statusEl.innerHTML = `<div class="big">${getClockStr(t)}</div><div class="sub">${getSeasonName()} · day ${getSeasonDay()}</div>
+    <div id="happy">pop ${population.employed}/${population.capacity} · <b>${population.happiness}%</b> happy</div>`;
+  hudDirty = false;
+}
+
+// ---- floating "+1 wood" labels projected from 3D ----
+const _pv = new THREE.Vector3();
+function renderFloating(dtFrames) {
+  for (let i = 0; i < floatingTexts.length; i++) {
+    const ft = floatingTexts[i]; ft.life -= dtFrames;
+    let el = ft.__el;
+    if (!el) { el = document.createElement('div'); el.className = 'ftl'; el.textContent = ft.text; el.style.color = ft.color; ftEl.appendChild(el); ft.__el = el; }
+    const rise = (ft.maxLife - ft.life) * 0.014;
+    _pv.set(tileWX(ft.x), groundYAt(ft.x + 0.5, ft.y + 0.5) + 1.7 + rise, tileWZ(ft.y)).project(camera);
+    const vis = _pv.z < 1;
+    el.style.transform = `translate(${(_pv.x*0.5+0.5)*innerWidth}px, ${(-_pv.y*0.5+0.5)*innerHeight}px)`;
+    el.style.opacity = vis ? Math.max(0, ft.life / ft.maxLife) : 0;
+  }
+  for (let i = floatingTexts.length - 1; i >= 0; i--) if (floatingTexts[i].life <= 0) { const el = floatingTexts[i].__el; if (el) el.remove(); floatingTexts.splice(i, 1); }
+  if (floatingTexts.length > 70) { const ex = floatingTexts.splice(0, floatingTexts.length - 70); ex.forEach(f => f.__el && f.__el.remove()); }
+}
+
+// ---- pointer → tile via raycast; build/road/demolish ----
+const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let hoverTX = -1, hoverTY = -1, roadStart = null, ghost = null, ghostType = null, downXY = null;
+function pickTileAt(clientX, clientY) {
+  ndc.set((clientX / innerWidth) * 2 - 1, -(clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(gTerrain, true)[0];
+  if (!hit) return null;
+  return { tx: Math.floor(hit.point.x + HALFW), ty: Math.floor(hit.point.z + HALFH) };
+}
+function makeGhost(type) { clearGhost(); ghost = buildFor(type, BLDG[type].size || 1); ghost.traverse(m => { if (m.material) { m.material = m.material.clone(); m.material.transparent = true; m.material.opacity = 0.5; m.castShadow = false; } }); ghostType = type; scene.add(ghost); }
+function clearGhost() { if (ghost) { disposeGroup(ghost); ghost = null; ghostType = null; } }
+function tintGhost(ok) { const col = ok ? C('#7dff8a') : C('#ff6a6a'); ghost.traverse(m => { if (m.material) m.material.color.copy(col); }); }
+
+cv.addEventListener('pointerdown', (e) => { downXY = { x: e.clientX, y: e.clientY, btn: e.button }; });
+cv.addEventListener('pointerup', (e) => {
+  if (!downXY) return;
+  const moved = Math.abs(e.clientX - downXY.x) + Math.abs(e.clientY - downXY.y), btn = downXY.btn; downXY = null;
+  if (btn === 2) { selectedBuilding = null; if (mode !== 'demolish' && mode !== 'road') mode = 'build'; roadStart = null; clearGhost(); refreshAffordability(); updateHint(); return; }
+  if (btn !== 0 || moved > 6) return;
+  const tile = pickTileAt(e.clientX, e.clientY); if (!tile) return;
+  if (mode === 'build' && selectedBuilding) { if (placeBuilding(selectedBuilding, tile.tx, tile.ty)) { hudDirty = true; updateHint(); } }
+  else if (mode === 'road') {
+    let flag = getFlagAt(tile.tx, tile.ty);
+    if (!flag) { if (placeFlag(tile.tx, tile.ty)) flag = getFlagAt(tile.tx, tile.ty); }
+    if (flag) { if (!roadStart) roadStart = flag; else { if (flag !== roadStart) placeRoad(roadStart, flag); roadStart = null; } updateHint(); }
+  } else if (mode === 'demolish') {
+    const bld = getBuildingAt(tile.tx, tile.ty);
+    if (bld && bld.type !== 'hq') { buildings.splice(buildings.indexOf(bld), 1); territoryDirty = true; }
+    else { const fl = getFlagAt(tile.tx, tile.ty); if (fl) { roads = roads.filter(r => !(r.from.tx===fl.tx&&r.from.ty===fl.ty) && !(r.to.tx===fl.tx&&r.to.ty===fl.ty)); carriers = carriers.filter(c => !(c.roadFrom.tx===fl.tx&&c.roadFrom.ty===fl.ty) && !(c.roadTo.tx===fl.tx&&c.roadTo.ty===fl.ty)); flags.splice(flags.indexOf(fl), 1); } }
+  }
+});
+cv.addEventListener('pointermove', (e) => {
+  const tile = pickTileAt(e.clientX, e.clientY);
+  if (!tile) { hoverTX = -1; tipEl.style.display = 'none'; if (ghost) ghost.visible = false; return; }
+  hoverTX = tile.tx; hoverTY = tile.ty;
+  if (ghost && mode === 'build') {
+    const s = BLDG[ghostType].size || 1, ok = canPlaceBuilding(ghostType, tile.tx, tile.ty);
+    ghost.visible = true; ghost.position.set(tileWX(tile.tx) + (s-1)/2, groundYAt(tile.tx + s/2, tile.ty + s/2), tileWZ(tile.ty) + (s-1)/2); tintGhost(ok);
+  }
+  // tooltip
+  const b = getBuildingAt(tile.tx, tile.ty), f = getFlagAt(tile.tx, tile.ty);
+  let title = '', lines = [];
+  if (b) { const def = BLDG[b.type]; title = def.name;
+    if (!b.built) { const needs = Object.entries(b.materialsNeeded).filter(([,v])=>v>0).map(([k,v])=>v+' '+k); lines = needs.length ? ['Awaiting: ' + needs.join(', ')] : ['Building… ' + Math.floor(b.progress*100) + '%']; }
+    else { if (def.produces) lines.push((b.working?'Working':'Idle') + ' · makes ' + def.produces); if (def.needs) lines.push('Needs: ' + def.needs + (def.needs2 ? ' + ' + def.needs2 : '')); const st = Object.entries(b.storage).filter(([,v])=>v>0).map(([k,v])=>v+' '+k); if (st.length) lines.push('Holds: ' + st.join(', ')); }
+  } else if (f) { const owner = getBuildingForFlag(f.tx, f.ty); title = (owner ? BLDG[owner.type].name + ' ' : '') + 'Flag'; lines = [f.items.length + '/8 goods' + (f.items.length ? ': ' + f.items.join(', ') : '')]; }
+  else { const ti = tile.ty*MAP_W+tile.tx; if (tile.tx>=0&&tile.tx<MAP_W&&tile.ty>=0&&tile.ty<MAP_H&&terrain[ti]===TERRAIN.MOUNTAIN&&minerals[ti]) { title = {1:'Iron',2:'Coal',3:'Gold'}[minerals[ti]] + ' deposit'; lines = ['Build the matching mine here']; } }
+  if (title) { tipEl.style.display = 'block'; tipEl.style.left = (e.clientX + 14) + 'px'; tipEl.style.top = (e.clientY + 14) + 'px'; tipEl.innerHTML = `<div class="t">${title}</div>` + lines.map(l => `<div class="l">${l}</div>`).join(''); }
+  else tipEl.style.display = 'none';
+});
+cv.addEventListener('contextmenu', (e) => e.preventDefault());
+addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveGame(false); return; }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); flashHint(loadGame() ? '✓ Village loaded' : 'No saved village yet'); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'r' || e.key === 'R') setMode(mode === 'road' ? 'build' : 'road');
+  else if (e.key === 'x' || e.key === 'X') setMode(mode === 'demolish' ? 'build' : 'demolish');
+  else if (e.key === 'Escape') { selectedBuilding = null; setMode('build'); }
+  else if (e.key === ' ') { setSpeed(speed === 0 ? 1 : 0, speed === 0 ? 'b-1' : 'b-pause'); e.preventDefault(); }
+  else if (e.key === 'n' || e.key === 'N') newMap();
+});
+
+// ---- day / night driven by the sim's clock (manualTime overrides, for screenshots) ----
+const nightSky = C('#1c2845'), daySkyTop = C('#2a5cff'), daySkyBot = C('#bfe0ff'), sunsetSky = C('#e98a4a');
+const nightGround = C('#33473a'), dayGround = C('#5a7a4a'), horizonSun = C('#ff8a3c'), highSun = C('#fff3df');
+const nightFill = C('#7e93c8');   // moonlight tint for the ambient floor
+const _fog = new THREE.Color();
+function updateSky() {
+  const t = manualTime != null ? manualTime : vDay;
+  const ang = (t - 0.25) * Math.PI * 2, alt = Math.sin(ang);
+  const daylight = Math.max(0, Math.min(1, (alt + 0.08) / 0.36)); const dl = daylight*daylight*(3-2*daylight);
+  const sunsetAmt = Math.max(0, 1 - Math.abs(alt) / 0.32) * (alt > -0.15 ? 1 : 0);
+  sun.position.set(Math.cos(ang) * 90, Math.max(alt, -0.25) * 90 + 5, 30);
+  sun.intensity = dl * 2.5 + 0.04;
+  sun.color.copy(horizonSun).lerp(highSun, Math.max(0, Math.min(1, (alt) / 0.45)));
+  hemi.intensity = 0.62 + dl * 0.36; hemi.color.copy(nightSky).lerp(daySkyBot, dl); hemi.groundColor.copy(nightGround).lerp(dayGround, dl);
+  amb.color.copy(nightFill).lerp(daySkyBot, dl); amb.intensity = 0.74 + dl * 0.06;   // strong moonlight floor so nights stay clearly buildable
+  skyUniforms.top.value.copy(nightSky).lerp(daySkyTop, dl).lerp(sunsetSky, sunsetAmt * 0.4);
+  skyUniforms.bottom.value.copy(nightSky).lerp(daySkyBot, dl).lerp(sunsetSky, sunsetAmt * 0.6);
+  _fog.copy(skyUniforms.bottom.value); scene.fog.color.copy(_fog);
+  const lit = 1 - dl;
+  for (const [, rec] of bldMeshes) { const wins = rec.group.userData.win; if (wins) for (const wm of wins) wm.emissiveIntensity = lit * 1.1; }
+}
+
+// ---- main loop ----
+let last = performance.now(), worldTimer = 0, hudTimer = 0;
+function animate(now) {
+  const dt = Math.min((now - last) / 1000, 0.1); last = now;
+  if (speed > 0) vDay = (vDay + dt / DAY_SECONDS) % 1;   // visual day advances on real time, paused with the sim
+  simulate();
+  // water shimmer
+  if (gWater) { const w = gWater.userData.water, base = gWater.userData.base, p = w.geometry.attributes.position.array; for (let i = 0; i < p.length; i += 3) { p[i+1] = Math.sin(now*0.0009 + base[i]*0.4 + base[i+2]*0.3) * 0.06; } w.geometry.attributes.position.needsUpdate = true; }
+  syncBuildings(); syncFlags(); syncRoads(); syncCarriers();
+  for (const [, rec] of bldMeshes) { const sail = rec.group.userData.sail; if (sail) sail.rotation.z += dt * 1.1; }
+  updateSky();
+  renderFloating(dt * 60 * Math.max(1, speed || 1) * 0.6 + dt * 30);
+  worldTimer += dt; if (worldDirty && worldTimer > 0.4) { rebuildWorld(); worldDirty = false; worldTimer = 0; }
+  hudTimer += dt; if ((hudDirty || hudTimer > 0.4)) { refreshHUD(); hudTimer = 0; }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+function clearDynamic() {
+  for (const [, rec] of bldMeshes) disposeGroup2(rec.group); bldMeshes.clear();
+  for (const [, g] of flagMeshes) disposeGroup2(g); flagMeshes.clear();
+  for (const [, m] of roadMeshes) { m.geometry.dispose(); m.material.dispose(); gDynamic.remove(m); } roadMeshes.clear();
+  for (const [, rec] of carMeshes) disposeGroup2(rec.group); carMeshes.clear();
+  for (const ft of floatingTexts) if (ft.__el) ft.__el.remove(); floatingTexts.length = 0;
+}
+function regenerate() {
+  buildings.length = 0; flags.length = 0; roads.length = 0; carriers.length = 0; animals.length = 0;
+  resources = {wood:10, planks:8, stone:8, bread:4, grain:0, flour:0, fish:2, water:0, meat:0, ironore:0, coal:0, goldore:0, iron:0, tools:0, coins:0};
+  tick = 0; gameTime = 0; vDay = 0.36; territoryDirty = true;   // start the visual clock mid-morning
+  clearDynamic();
+  generateMap(); addDemoVillage(); updateTerritory(); updatePopulation();
+  rebuildWorld(); saveGame(true); hudDirty = true;
+}
+
+// ---- persistence (localStorage) ----
+const SAVE_KEY = 'settlers3d-save';
+function saveGame(silent) {
+  try {
+    const round = (a) => Array.from(a, v => +v.toFixed(3));
+    const data = {
+      v: 2, w: MAP_W, h: MAP_H, tick, vDay,
+      terrain: Array.from(terrain), minerals: Array.from(minerals), height: round(height), river: [...riverSet],
+      resources: Object.assign({}, resources), population: Object.assign({}, population),
+      buildings: buildings.map(b => ({ type:b.type, tx:b.tx, ty:b.ty, built:b.built, progress:b.progress, materialsNeeded:b.materialsNeeded, materialsTotal:b.materialsTotal, working:b.working, cooldown:b.cooldown, storage:b.storage })),
+      flags: flags.map(f => ({ tx:f.tx, ty:f.ty, items:f.items.slice() })),
+      roads: roads.map(r => ({ from:{tx:r.from.tx,ty:r.from.ty}, to:{tx:r.to.tx,ty:r.to.ty} })),
+      carriers: carriers.map(c => ({ tx:c.tx, ty:c.ty, targetTx:c.targetTx, targetTy:c.targetTy, carrying:c.carrying, roadFrom:{tx:c.roadFrom.tx,ty:c.roadFrom.ty}, roadTo:{tx:c.roadTo.tx,ty:c.roadTo.ty}, state:c.state, moveProgress:c.moveProgress, moveSpeed:c.moveSpeed })),
+      animals: animals.map(a => ({ tx:a.tx, ty:a.ty, type:a.type, dir:a.dir, timer:a.timer, phase:a.phase }))
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    if (!silent) flashHint('✓ Village saved');
+  } catch (e) { console.warn('[settlers3d] save failed:', e); if (!silent) flashHint('Save failed (storage full?)'); }
+}
+function loadGame() {
+  let raw; try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { console.warn('[settlers3d] load read failed:', e); return false; }
+  if (!raw) return false;
+  let d; try { d = JSON.parse(raw); } catch (e) { console.warn('[settlers3d] save corrupt, ignoring:', e); return false; }
+  if (!d || d.w !== MAP_W || d.h !== MAP_H || !d.terrain || d.terrain.length !== MAP_W * MAP_H) { console.warn('[settlers3d] save size/version mismatch, starting fresh'); return false; }
+  terrain.set(d.terrain); minerals.set(d.minerals); height.set(d.height); riverSet = new Set(d.river || []);
+  resources = Object.assign({}, d.resources); population = Object.assign({ capacity:10, employed:0, happiness:50 }, d.population);
+  tick = d.tick || 0; vDay = (d.vDay != null) ? d.vDay : 0.36;
+  buildings = (d.buildings || []).map(b => ({ type:b.type, tx:b.tx, ty:b.ty, built:b.built, progress:b.progress, materialsNeeded:b.materialsNeeded || {}, materialsTotal:b.materialsTotal || {}, working:b.working, cooldown:b.cooldown || 0, storage:b.storage || {}, workerOut:false }));
+  flags = (d.flags || []).map(f => ({ tx:f.tx, ty:f.ty, items:f.items || [] }));
+  roads = (d.roads || []).map(r => ({ from:{tx:r.from.tx,ty:r.from.ty}, to:{tx:r.to.tx,ty:r.to.ty} }));
+  carriers = (d.carriers || []).map(c => ({ tx:c.tx, ty:c.ty, targetTx:c.targetTx, targetTy:c.targetTy, carrying:c.carrying, roadFrom:{tx:c.roadFrom.tx,ty:c.roadFrom.ty}, roadTo:{tx:c.roadTo.tx,ty:c.roadTo.ty}, state:c.state, moveProgress:c.moveProgress || 0, moveSpeed:c.moveSpeed || CARRIER_SPEED, waitTimer:0, goingTo:null }));
+  animals = d.animals || [];
+  computeElevation(); territoryDirty = true; updateTerritory(); updatePopulation();
+  clearDynamic(); rebuildWorld(); hudDirty = true;
+  return true;
+}
+function newMap() { if (confirm('Start a new map? This replaces your current village.')) regenerate(); }
+
+function onResize() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }
+addEventListener('resize', onResize);
+
+// debug hooks for screenshots / inspection
+window.setDay = (t) => { manualTime = ((t % 1) + 1) % 1; };
+window.clearDay = () => { manualTime = null; };
+window.dbg = {
+  closeUp(dist = 11) { const hq = buildings.find(b => b.type === 'hq'); const tx = hq ? hq.tx : MAP_W/2, ty = hq ? hq.ty : MAP_H/2;
+    const wx = tileWX(tx), wz = tileWZ(ty), gy = groundYAt(tx+0.5, ty+0.5);
+    controls.target.set(wx, gy + 1, wz); camera.position.set(wx + dist*0.7, gy + dist*0.7, wz + dist); controls.update(); },
+  stats() { return JSON.stringify({ buildings: buildings.length, built: buildings.filter(b=>b.built).length, flags: flags.length, roads: roads.length, carriers: carriers.length, carrying: carriers.filter(c=>c.carrying).length }); },
+  sig() { let s = 0; for (let i = 0; i < terrain.length; i++) s = (s + terrain[i] * ((i % 13) + 1)) % 1000003; return s + '|' + buildings.map(b => b.type + b.tx + ',' + b.ty).join(';'); }
+};
+window.capture = (scale = 0.85, q = 0.85) => {
+  renderer.render(scene, camera);
+  const w = Math.round(cv.width * scale), h = Math.round(cv.height * scale);
+  const t = document.createElement('canvas'); t.width = w; t.height = h; t.getContext('2d').drawImage(cv, 0, 0, w, h);
+  return t.toDataURL('image/jpeg', q);
+};
+
+// ---- boot ----
+try {
+  onResize();
+  buildPalette(); buildControls();
+  gWater = buildWaterMesh(); scene.add(gWater);
+  const resumed = loadGame();         // pick up where you left off, else fresh demo village
+  if (!resumed) regenerate();
+  refreshHUD(); updateHint();
+  document.getElementById('loading').style.display = 'none';
+  for (const id of ['res','hint','build','ctrl','status','intro']) document.getElementById(id).style.display = '';
+  requestAnimationFrame(animate);
+  setInterval(() => saveGame(true), 30000);   // autosave every 30s
+  if (resumed) flashHint('✓ Resumed your saved village');
+} catch (err) {
+  console.error(err);
+  document.getElementById('loading').style.display = 'none';
+  const el = document.getElementById('err'); el.style.display = 'grid';
+  el.textContent = 'Render failed: ' + (err && err.message || err) + '  — (Three.js loads from a CDN; this spike needs an internet connection.)';
+}
+</script>
+</body>
+</html>
