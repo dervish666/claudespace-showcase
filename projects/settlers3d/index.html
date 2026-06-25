@@ -1004,11 +1004,11 @@ function mineBuild(s, ore) {
 // Models auto-fit their footprint to the building's tile size, sit on the ground, and
 // face +Z; only `url` and (optional) `yaw`/`scale` (a fill multiplier, default 0.92) are needed.
 const MODELS = {
-  // Kenney Fantasy Town Kit (CC0) — complete buildings drop straight in:
-  mill:    { url: 'assets/windmill.glb',  yaw: 0 },
-  sawmill: { url: 'assets/watermill.glb', yaw: 0 },
-  well:    { url: 'assets/fountain.glb',  yaw: 0 },
-  // houses/cottages/etc. are assembled from the kit's modular wall+roof pieces (TODO)
+  // Kenney Fantasy Town Kit (CC0). The kit is modular: fountain is a complete model,
+  // but windmill.glb/watermill.glb are just the sail/wheel COMPONENTS (not buildings),
+  // kept in assets/ to mount onto assembled mills later. Buildings without an entry
+  // here render their procedural mesh.
+  well: { url: 'assets/fountain.glb', yaw: 0 },
 };
 const gltfLoader = new GLTFLoader();
 const modelCache = {};   // type -> { scene, size, center, minY }
