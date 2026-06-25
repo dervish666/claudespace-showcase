@@ -124,7 +124,8 @@
 
 <script type="module">
 import * as THREE from 'three';
-import { OrbitControls } from './vendor/OrbitControls.js';
+import { OrbitControls } from './vendor/controls/OrbitControls.js';
+import { GLTFLoader } from './vendor/loaders/GLTFLoader.js';
 
 // ===========================================================================
 // >>> LIFTED SIM <<<  — copied verbatim from ../index.html. Do not edit logic.
@@ -997,7 +998,38 @@ function mineBuild(s, ore) {
   crystal.position.set(s*0.32, s*0.42, s*0.18); crystal.castShadow = true; g.add(crystal);
   return g;
 }
+// ---- optional .glb building models (CC0 kit), with procedural fallback ----
+// Drop a model in assets/ and add an entry here to swap a building's mesh for it.
+// scale is multiplied by the footprint size; yaw rotates to face +Z (door front); y nudges height.
+const MODELS = {
+  // hq:        { url: 'assets/hq.glb',        scale: 1.0, yaw: 0, y: 0 },
+  // house:     { url: 'assets/house.glb',     scale: 1.0, yaw: 0, y: 0 },
+  // cottage:   { url: 'assets/cottage.glb',   scale: 1.0, yaw: 0, y: 0 },
+  // mill:      { url: 'assets/mill.glb',      scale: 1.0, yaw: 0, y: 0 },
+  // sawmill:   { url: 'assets/sawmill.glb',   scale: 1.0, yaw: 0, y: 0 },
+  // guard:     { url: 'assets/guard.glb',     scale: 1.0, yaw: 0, y: 0 },
+};
+const gltfLoader = new GLTFLoader();
+const modelCache = {};
+function loadModels() {
+  const jobs = Object.entries(MODELS).filter(([, m]) => m && m.url).map(([type, m]) => new Promise((resolve) => {
+    gltfLoader.load(m.url, (gltf) => {
+      gltf.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      modelCache[type] = gltf.scene; resolve();
+    }, undefined, (err) => { console.warn('[settlers3d] model failed, using procedural for', type + ':', (err && err.message) || err); resolve(); });
+  }));
+  return Promise.all(jobs);
+}
 function buildFor(type, s) {
+  const m = MODELS[type];
+  if (m && modelCache[type]) {
+    const g = new THREE.Group(), node = modelCache[type].clone(true);
+    node.scale.setScalar((m.scale || 1) * s); node.rotation.y = m.yaw || 0; node.position.y = m.y || 0;
+    g.add(node); return g;
+  }
+  return proceduralBuild(type, s);
+}
+function proceduralBuild(type, s) {
   if (type === 'hq') return keepBuild(s);
   if (type === 'mill') return millBuild(s);
   if (type === 'guard') return guardBuild(s);
@@ -1513,6 +1545,7 @@ try {
   onResize();
   buildPalette(); buildControls();
   gWater = buildWaterMesh(); scene.add(gWater);
+  await loadModels();                 // load any configured .glb building models (no-op if none)
   const resumed = loadGame();         // pick up where you left off, else fresh demo village
   if (!resumed) regenerate();
   refreshHUD(); updateHint();
